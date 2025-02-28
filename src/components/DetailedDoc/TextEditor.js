@@ -1,35 +1,51 @@
 import { convertFromRaw, convertToRaw, EditorState } from 'draft-js';
-import { doc, updateDoc } from 'firebase/firestore';
-import { useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
 import { useParams } from 'react-router-dom';
-import { DocsContext } from '../../context/docs/DocsState';
-import { db } from '../../firebase';
+import { getDocument, saveDocument } from '../../services/localStorageService';
 
 const TextEditor = () => {
   const [editorState, setEditorState] = useState(EditorState.createEmpty());
 
-  const { singleDoc } = useContext(DocsContext);
 
   const { id } = useParams();
 
   useEffect(() => {
-    if (singleDoc?.content) {
-      setEditorState(
-        EditorState.createWithContent(convertFromRaw(singleDoc.content))
-      );
+    const loadContent = async () => {
+      try {
+        const doc = await getDocument(id);
+        if (doc?.content) {
+          setEditorState(
+            EditorState.createWithContent(convertFromRaw(doc.content))
+          );
+        }
+      } catch (error) {
+        console.error('Error loading document content:', error);
+      }
+    };
+
+    if (id) {
+      loadContent();
     }
-  }, [singleDoc?.content]);
+  }, [id]);
 
   const handleEditorStateChange = async (editorState) => {
     setEditorState(editorState);
-
-    const docRef = doc(db, 'gdocs', id);
-
-    await updateDoc(docRef, {
-      content: convertToRaw(editorState.getCurrentContent()),
-    });
+    
+    try {
+      // Get existing document first
+      const existingDoc = await getDocument(id);
+      // Update document with new content
+      await saveDocument({
+        ...existingDoc,
+        id,
+        content: convertToRaw(editorState.getCurrentContent()),
+        lastModified: Date.now()
+      });
+    } catch (error) {
+      console.error('Error saving document content:', error);
+    }
   };
 
   return (

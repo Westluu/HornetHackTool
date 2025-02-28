@@ -1,16 +1,7 @@
-import {
-  doc,
-  onSnapshot,
-  query,
-  where,
-  deleteDoc,
-  updateDoc,
-  orderBy,
-} from 'firebase/firestore';
 import { createContext, useContext, useEffect, useReducer } from 'react';
-import { colRef, db } from '../../firebase';
 import { AuthContext } from '../auth/AuthState';
 import { initialState, reducer } from './DocsReducer';
+import { getAllDocuments, deleteDocument, saveDocument, getDocument } from '../../services/localStorageService';
 
 export const DocsContext = createContext();
 
@@ -21,21 +12,20 @@ const DocsState = ({ children }) => {
 
   const uid = user?.uid ? user?.uid : '';
 
-  // GET THE USER'S DOCS!
-
+  // GET THE USER'S DOCS
   useEffect(() => {
-    const q = query(
-      colRef,
-      where('authID', '==', uid),
-      orderBy('timeStamp', 'desc')
-    );
-    onSnapshot(q, (snapshpt) => {
-      const docList = snapshpt.docs.map((doc) => ({
-        ...doc.data(),
-        id: doc.id,
-      }));
-      dispatch({ type: 'GET_INITIAL_DOCS', payload: docList });
-    });
+    const loadDocuments = async () => {
+      if (!uid) return;
+      
+      try {
+        const docs = await getAllDocuments(uid);
+        dispatch({ type: 'GET_INITIAL_DOCS', payload: docs });
+      } catch (error) {
+        console.error('Error loading documents:', error);
+      }
+    };
+
+    loadDocuments();
   }, [uid]);
 
   const storeSingleDoc = (doc) => {
@@ -44,25 +34,29 @@ const DocsState = ({ children }) => {
 
   // UPDATE DOC!
 
-  const updateDocument = async (title, id) => {
+  const updateDocumentTitle = async (title, id) => {
     try {
-      const docRef = doc(db, 'gdocs', id);
-      await updateDoc(docRef, {
+      const existingDoc = await getDocument(id);
+      if (!existingDoc) throw new Error('Document not found');
+
+      await saveDocument({
+        ...existingDoc,
         title,
+        lastModified: Date.now()
       });
     } catch (error) {
-      alert(error);
+      console.error('Error updating document:', error);
+      throw error;
     }
   };
 
-  // DELETE DOC!
-
-  const deleteDocument = async (id) => {
+  // DELETE DOC
+  const handleDeleteDocument = async (id) => {
     try {
-      const docRef = doc(db, 'gdocs', id);
-      await deleteDoc(docRef);
+      await deleteDocument(id);
     } catch (error) {
-      alert(error);
+      console.error('Error deleting document:', error);
+      throw error;
     }
   };
 
@@ -70,9 +64,9 @@ const DocsState = ({ children }) => {
     <DocsContext.Provider
       value={{
         ...state,
-        deleteDocument,
+        deleteDocument: handleDeleteDocument,
         storeSingleDoc,
-        updateDocument,
+        updateDocument: updateDocumentTitle,
         dispatch,
       }}
     >
