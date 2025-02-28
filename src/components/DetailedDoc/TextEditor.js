@@ -48,6 +48,44 @@ const TextEditor = () => {
     }
   };
 
+  //AI Button Component
+  const AIButton = () => (
+    <button
+    style={{
+      padding: '5px 10px',
+      margin: '5px',
+      backgroundColor: '#007bff',
+      color: 'white',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer'
+    }}
+    onClick={() => alert('AI Button!')}
+  >
+      AI
+
+    </button>
+  );
+
+  //Diagram Button Component
+  const DiagramButton = () => (
+    <button
+    style={{
+      padding: '5px 10px',
+      margin: '5px',
+      backgroundColor: '#007bff',
+      color: 'white',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer'
+    }}
+    onClick={() => alert('Diagram Button!')}
+  >
+      Diagram
+
+    </button>
+  );
+
   return (
     <div className='bg-[#F8F9FA] min-h-screen pb-16'>
       <Editor
@@ -55,7 +93,9 @@ const TextEditor = () => {
         onEditorStateChange={handleEditorStateChange}
         toolbarClassName='sticky top-0 z-50 !justify-center'
         editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen'
-      />
+        toolbarCustomButtons={[<AIButton key="custom-button" />, 
+        <DiagramButton key="custom-button" />]}
+     />
     </div>
   );
 };
