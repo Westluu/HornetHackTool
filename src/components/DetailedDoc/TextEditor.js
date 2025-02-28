@@ -144,8 +144,6 @@ const TextEditor = () => {
     }
   };
 
-
-
   //AI Button Component
   const AIButton = () => (
     <button
@@ -191,13 +189,9 @@ const TextEditor = () => {
         onEditorStateChange={handleEditorStateChange}
         toolbarClassName='sticky top-0 z-50 !justify-center'
         editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen'
-        toolbar={{
-          options: ['inline', 'blockType', 'fontSize', 'list', 'textAlign', 'history'],
-          inline: {
-            options: ['bold', 'italic', 'underline', 'strikethrough'],
-          },
-        }}
-      />
+        toolbarCustomButtons={[<AIButton key="custom-button" />, 
+        <DiagramButton key="custom-button" />]}
+     />
       {toolbarPosition && (
         <SelectionToolbar
           position={toolbarPosition}
