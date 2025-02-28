@@ -43,12 +43,11 @@ const TextEditor = () => {
     const selectedText = getSelectedText(contentState, selection);
 
     if (selectedText && !selection.isCollapsed()) {
-      const editorElement = document.querySelector('.rdw-editor-main');
-      if (editorElement) {
-        const rect = editorElement.getBoundingClientRect();
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0) {
+        const selectionRect = selection.getRangeAt(0).getBoundingClientRect();
         setToolbarPosition({
-          top: rect.top + window.scrollY + 5,
-          left: rect.left + window.scrollX + 10
+          top: selectionRect.top + window.scrollY
         });
       }
     } else {
@@ -121,12 +120,12 @@ const TextEditor = () => {
 
       if (!selectedText) return;
 
-      const rewrittenText = await rewriteText(selectedText, style);
+      const result = await rewriteText(selectedText, style);
       
       const newContentState = Modifier.replaceText(
         contentState,
         selection,
-        rewrittenText
+        result
       );
 
       const newEditorState = EditorState.push(
