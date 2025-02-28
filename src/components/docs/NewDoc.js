@@ -67,8 +67,31 @@ const NewDoc = () => {
       if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         // Handle .docx files
         const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        fileContent = result.value;
+        const result = await mammoth.convertToHtml({ arrayBuffer });
+        // Convert HTML to plain text while preserving formatting
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = result.value;
+        
+        // Replace specific HTML elements with appropriate text formatting
+        const paragraphs = tempDiv.getElementsByTagName('p');
+        for (let p of paragraphs) {
+          p.innerHTML = p.innerHTML.trim() + '\n';
+        }
+        
+        const headings = tempDiv.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        for (let h of headings) {
+          h.innerHTML = '\n' + h.innerHTML.trim() + '\n';
+        }
+        
+        const lists = tempDiv.querySelectorAll('ul, ol');
+        for (let list of lists) {
+          const items = list.getElementsByTagName('li');
+          for (let item of items) {
+            item.innerHTML = '• ' + item.innerHTML.trim() + '\n';
+          }
+        }
+        
+        fileContent = tempDiv.innerText.trim();
       } else if (file.type === 'application/pdf') {
         // Handle PDF files
         try {
@@ -80,10 +103,43 @@ const NewDoc = () => {
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            text += textContent.items.map(item => item.str).join(' ') + '\n';
+            
+            // Process items with their positions
+            let lastY, lastX, lastWidth;
+            let currentLine = '';
+            
+            for (const item of textContent.items) {
+              if (lastY !== undefined && lastY !== item.transform[5]) {
+                // New line detected
+                text += currentLine.trim() + '\n';
+                currentLine = '';
+              }
+              
+              // Add space if needed
+              if (currentLine && item.str !== ' ') {
+                const spaceWidth = 4; // Approximate space width
+                const gap = Math.abs(item.transform[4] - (lastX + lastWidth));
+                if (gap > spaceWidth) {
+                  currentLine += ' ';
+                }
+              }
+              
+              currentLine += item.str;
+              lastY = item.transform[5];
+              lastX = item.transform[4];
+              lastWidth = item.width;
+            }
+            
+            // Add the last line of the page
+            if (currentLine) {
+              text += currentLine.trim() + '\n';
+            }
+            
+            // Add extra newline between pages
+            text += '\n';
           }
           
-          fileContent = text;
+          fileContent = text.trim();
         } catch (error) {
           console.error('Error parsing PDF:', error);
           throw new Error('Failed to parse PDF file. Please make sure it is a valid PDF document.');
@@ -92,7 +148,16 @@ const NewDoc = () => {
         // Handle text files
         fileContent = await new Promise((resolve, reject) => {
           const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target.result);
+          reader.onload = (e) => {
+            // Normalize line endings and handle spacing
+            const text = e.target.result
+              .replace(/\r\n/g, '\n') // Normalize line endings
+              .replace(/\r/g, '\n')
+              .replace(/\n\s*\n/g, '\n\n') // Normalize multiple blank lines to just two
+              .replace(/\t/g, '    ') // Convert tabs to spaces
+              .trim();
+            resolve(text);
+          };
           reader.onerror = (error) => reject(error);
           reader.readAsText(file);
         });
