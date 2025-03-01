@@ -42,7 +42,7 @@ export const improveWriting = async (text) => {
     "${text}"
     
     Improved version:`;
-
+  
   const response = await generateAIResponse(prompt);
   return response.replace(/^"|"$/g, '').trim();
 };
