@@ -1,4 +1,5 @@
-import { convertFromRaw, convertToRaw, EditorState, Modifier } from 'draft-js';
+import { convertFromRaw, convertToRaw, EditorState, Modifier, ContentState, ContentBlock, genKey } from 'draft-js';
+import GraphBlock from './GraphBlock';
 import { useEffect, useState } from 'react';
 import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
@@ -11,7 +12,7 @@ const TextEditor = () => {
   const [editorState, setEditorState] = useState(EditorState.createEmpty());
   const [toolbarPosition, setToolbarPosition] = useState(null);
   const [loading, setLoading] = useState(false);
-
+  const [graphBlocks, setGraphBlocks] = useState({});
 
   const { id } = useParams();
 
@@ -163,33 +164,161 @@ const TextEditor = () => {
   );
 
   //Diagram Button Component
-  const DiagramButton = () => (
-    <button
-    style={{
-      padding: '5px 10px',
-      margin: '5px',
-      backgroundColor: '#007bff',
-      color: 'white',
-      border: 'none',
-      borderRadius: '4px',
-      cursor: 'pointer'
-    }}
-    onClick={() => alert('Diagram Button!')}
-  >
-      Diagram
+  const DiagramButton = () => {
+    const handleGraphClick = () => {
+      const contentState = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
+      const selectedText = getSelectedText(contentState, selection);
+      
+      if (selectedText) {
+        // Format equation for LaTeX immediately when capturing text
+        let equation = selectedText.trim().replace(/\s+/g, '');
+        
+        // Add y= if needed
+        if (!equation.includes('=')) {
+          equation = `y=${equation}`;
+        }
 
-    </button>
-  );
+        // Only format trig functions if they exist
+        const trigFunctions = ['sin', 'cos', 'tan'];
+        trigFunctions.forEach(trig => {
+          if (equation.includes(trig + '(')) {
+            equation = equation.replace(
+              new RegExp(trig + '\\(', 'g'), 
+              '\\' + trig + '('
+            );
+          }
+        });
+        
+        console.log('Formatted equation:', equation);
+        
+        // Get current selection's block key and offset
+        const startKey = selection.getStartKey();
+        const endOffset = selection.getEndOffset();
+        
+        // Split the block at cursor
+        let contentStateWithSplit = Modifier.splitBlock(
+          contentState,
+          selection.merge({
+            anchorOffset: endOffset,
+            focusOffset: endOffset,
+          })
+        );
+
+        // Create a new block key for the graph
+        const graphBlockKey = genKey();
+        
+        // Store the graph data
+        const graphData = { equation, type: 'graph' };
+        setGraphBlocks(prev => ({
+          ...prev,
+          [graphBlockKey]: graphData
+        }));
+        
+        console.log('Storing graph data:', graphBlockKey, graphData);
+
+        // Create a new block for the graph
+        const graphBlock = new ContentBlock({
+          key: graphBlockKey,
+          type: 'graph',
+          text: ' '
+        });
+
+        // Get the block array and insert the graph block
+        const blocks = contentStateWithSplit.getBlocksAsArray();
+        const blockIndex = blocks.findIndex(block => block.getKey() === startKey);
+        
+        if (blockIndex !== -1) {
+          blocks.splice(blockIndex + 1, 0, graphBlock);
+          console.log('Inserted graph block at index:', blockIndex + 1);
+        }
+
+        // Create new content state with the inserted block
+        const finalContentState = ContentState.createFromBlockArray(blocks);
+
+        // Push the new content state
+        const newEditorState = EditorState.push(
+          editorState,
+          finalContentState,
+          'insert-fragment'
+        );
+
+        handleEditorStateChange(newEditorState);
+      } else {
+        alert('Please select an equation to graph');
+      }
+    };
+
+    return (
+      <button
+        style={{
+          padding: '5px 10px',
+          margin: '5px',
+          backgroundColor: '#007bff',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+        onClick={handleGraphClick}
+      >
+        Graph
+      </button>
+    );
+  };
 
   return (
     <div className='bg-[#F8F9FA] min-h-screen pb-16 relative'>
+
       <Editor
         editorState={editorState}
         onEditorStateChange={handleEditorStateChange}
         toolbarClassName='sticky top-0 z-50 !justify-center'
-        editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen'
-        toolbarCustomButtons={[<AIButton key="custom-button" />, 
-        <DiagramButton key="custom-button" />]}
+        editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen relative'
+        toolbarCustomButtons={[<AIButton key="ai-button" />, 
+        <DiagramButton key="diagram-button" />]}
+        blockRendererFn={block => {
+          if (block.getType() === 'graph') {
+            const graphData = graphBlocks[block.getKey()];
+            console.log('Rendering graph block:', block.getKey(), graphData);
+            if (!graphData) return null;
+            
+            return {
+              component: GraphBlock,
+              editable: false,
+              props: {
+                blockKey: block.getKey(),
+                ...graphData,
+                onRemove: () => {
+                  // Remove the block from graphBlocks state first
+                  setGraphBlocks(prev => {
+                    const newBlocks = { ...prev };
+                    delete newBlocks[block.getKey()];
+                    return newBlocks;
+                  });
+
+                  // Then remove the block from editor state
+                  const contentState = editorState.getCurrentContent();
+                  const selection = editorState.getSelection();
+                  const blockMap = contentState.getBlockMap().delete(block.getKey());
+                  const newContent = contentState.merge({
+                    blockMap,
+                    selectionAfter: selection
+                  });
+
+                  const newEditorState = EditorState.push(
+                    editorState,
+                    newContent,
+                    'remove-range'
+                  );
+
+                  handleEditorStateChange(newEditorState);
+                }
+              }
+            };
+          }
+          return null;
+        }}
      />
       {toolbarPosition && (
         <SelectionToolbar
