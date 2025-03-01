@@ -6,12 +6,14 @@ import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
 import { useParams } from 'react-router-dom';
 import { getDocument, saveDocument } from '../../services/localStorageService';
 import { rewriteText } from '../../services/aiService';
+
 import SelectionToolbar from './SelectionToolbar';
 
 const TextEditor = () => {
   const [editorState, setEditorState] = useState(EditorState.createEmpty());
   const [toolbarPosition, setToolbarPosition] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [graphBlocks, setGraphBlocks] = useState({});
 
   const { id } = useParams();
@@ -47,8 +49,14 @@ const TextEditor = () => {
       const selection = window.getSelection();
       if (selection.rangeCount > 0) {
         const selectionRect = selection.getRangeAt(0).getBoundingClientRect();
+        const windowHeight = window.innerHeight;
+        const toolbarHeight = 300; // Approximate height of toolbar
+
+        // If selection is in bottom half of screen, show toolbar above selection
+        const isNearBottom = selectionRect.top > windowHeight - toolbarHeight - 100;
+        
         setToolbarPosition({
-          top: selectionRect.top + window.scrollY
+          top: isNearBottom ? selectionRect.top - toolbarHeight - 10 : selectionRect.top + window.scrollY
         });
       }
     } else {
@@ -70,6 +78,8 @@ const TextEditor = () => {
       console.error('Error saving document content:', error);
     }
   };
+
+  
 
   const getSelectedText = (contentState, selection) => {
     if (selection.isCollapsed()) return '';
@@ -108,26 +118,27 @@ const TextEditor = () => {
     return selectedText;
   };
 
+
   const handleRewrite = async (style) => {
     try {
+      setError(null);
       setLoading(true);
       
       const contentState = editorState.getCurrentContent();
       const selection = editorState.getSelection();
-      const selectedText = contentState
-        .getBlockForKey(selection.getStartKey())
-        .getText()
-        .slice(selection.getStartOffset(), selection.getEndOffset());
+      const selectedText = getSelectedText(contentState, selection);
 
       if (!selectedText) return;
 
-      const result = await rewriteText(selectedText, style);
+
+      const rewrittenText = await rewriteText(selectedText, style);
       
-      const newContentState = Modifier.replaceText(
-        contentState,
-        selection,
-        result
-      );
+      if (rewrittenText && rewrittenText !== selectedText) {
+        const newContentState = Modifier.replaceText(
+          contentState,
+          selection,
+          rewrittenText
+        );
 
       const newEditorState = EditorState.push(
         editorState,
@@ -135,12 +146,17 @@ const TextEditor = () => {
         'insert-characters'
       );
       
-      handleEditorStateChange(newEditorState);
+        handleEditorStateChange(newEditorState);
+      }
     } catch (error) {
       console.error('Rewrite error:', error);
+      setError(error.message || 'Failed to rewrite text');
     } finally {
       setLoading(false);
-      setToolbarPosition(null);
+      // Only hide toolbar if no error
+      if (!error) {
+        setToolbarPosition(null);
+      }
     }
   };
 
@@ -163,76 +179,71 @@ const TextEditor = () => {
     </button>
   );
 
-  //Diagram Button Component
-  const DiagramButton = () => {
-    const handleGraphClick = () => {
-      const contentState = editorState.getCurrentContent();
-      const selection = editorState.getSelection();
-      const selectedText = getSelectedText(contentState, selection);
+  const handleRemoveGraph = (blockKey) => {
+    // Remove the graph block from state
+    const newGraphBlocks = { ...graphBlocks };
+    delete newGraphBlocks[blockKey];
+    setGraphBlocks(newGraphBlocks);
+  };
+
+  const handleGraphClick = () => {
+    const contentState = editorState.getCurrentContent();
+    const selection = editorState.getSelection();
+    const selectedText = getSelectedText(contentState, selection);
+    
+    if (selectedText) {
+      // Format equation for LaTeX
+      let equation = selectedText.trim().replace(/\s+/g, '');
       
-      if (selectedText) {
-        // Format equation for LaTeX immediately when capturing text
-        let equation = selectedText.trim().replace(/\s+/g, '');
-        
-        // Add y= if needed
-        if (!equation.includes('=')) {
-          equation = `y=${equation}`;
+      // Add y= if needed
+      if (!equation.includes('=')) {
+        equation = `y=${equation}`;
+      }
+
+      // Format trig functions
+      const trigFunctions = ['sin', 'cos', 'tan'];
+      trigFunctions.forEach(trig => {
+        if (equation.includes(trig + '(')) {
+          equation = equation.replace(
+            new RegExp(trig + '\\(', 'g'),
+            '\\' + trig + '('
+          );
         }
+      });
 
-        // Only format trig functions if they exist
-        const trigFunctions = ['sin', 'cos', 'tan'];
-        trigFunctions.forEach(trig => {
-          if (equation.includes(trig + '(')) {
-            equation = equation.replace(
-              new RegExp(trig + '\\(', 'g'), 
-              '\\' + trig + '('
-            );
-          }
-        });
-        
-        console.log('Formatted equation:', equation);
-        
-        // Get current selection's block key and offset
-        const startKey = selection.getStartKey();
-        const endOffset = selection.getEndOffset();
-        
-        // Split the block at cursor
-        let contentStateWithSplit = Modifier.splitBlock(
-          contentState,
-          selection.merge({
-            anchorOffset: endOffset,
-            focusOffset: endOffset,
-          })
-        );
+      // Create a new block key for the graph
+      const graphBlockKey = genKey();
+      
+      // Store the graph data
+      const graphData = { equation, type: 'graph' };
+      setGraphBlocks(prev => ({
+        ...prev,
+        [graphBlockKey]: graphData
+      }));
+      
+      // Split the block at cursor
+      let contentStateWithSplit = Modifier.splitBlock(
+        contentState,
+        selection.merge({
+          anchorOffset: selection.getEndOffset(),
+          focusOffset: selection.getEndOffset(),
+        })
+      );
 
-        // Create a new block key for the graph
-        const graphBlockKey = genKey();
-        
-        // Store the graph data
-        const graphData = { equation, type: 'graph' };
-        setGraphBlocks(prev => ({
-          ...prev,
-          [graphBlockKey]: graphData
-        }));
-        
-        console.log('Storing graph data:', graphBlockKey, graphData);
+      // Create a new block for the graph
+      const graphBlock = new ContentBlock({
+        key: graphBlockKey,
+        type: 'graph',
+        text: ' '
+      });
 
-        // Create a new block for the graph
-        const graphBlock = new ContentBlock({
-          key: graphBlockKey,
-          type: 'graph',
-          text: ' '
-        });
-
-        // Get the block array and insert the graph block
-        const blocks = contentStateWithSplit.getBlocksAsArray();
-        const blockIndex = blocks.findIndex(block => block.getKey() === startKey);
+      // Get the block array and insert the graph block
+      const blocks = contentStateWithSplit.getBlocksAsArray();
+      const blockIndex = blocks.findIndex(block => block.getKey() === selection.getStartKey());
+      
+      if (blockIndex !== -1) {
+        blocks.splice(blockIndex + 1, 0, graphBlock);
         
-        if (blockIndex !== -1) {
-          blocks.splice(blockIndex + 1, 0, graphBlock);
-          console.log('Inserted graph block at index:', blockIndex + 1);
-        }
-
         // Create new content state with the inserted block
         const finalContentState = ContentState.createFromBlockArray(blocks);
 
@@ -245,26 +256,11 @@ const TextEditor = () => {
 
         handleEditorStateChange(newEditorState);
       } else {
-        alert('Please select an equation to graph');
+        alert('Could not find insertion point for graph');
       }
-    };
-
-    return (
-      <button
-        style={{
-          padding: '5px 10px',
-          margin: '5px',
-          backgroundColor: '#007bff',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer'
-        }}
-        onClick={handleGraphClick}
-      >
-        Graph
-      </button>
-    );
+    } else {
+      alert('Please select an equation to graph');
+    }
   };
 
   return (
@@ -276,7 +272,7 @@ const TextEditor = () => {
         toolbarClassName='sticky top-0 z-50 !justify-center'
         editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen relative'
         toolbarCustomButtons={[<AIButton key="ai-button" />, 
-        <DiagramButton key="diagram-button" />]}
+        <button key="diagram-button" onClick={handleGraphClick}>Graph</button>]}
         blockRendererFn={block => {
           if (block.getType() === 'graph') {
             const graphData = graphBlocks[block.getKey()];
@@ -324,11 +320,20 @@ const TextEditor = () => {
         <SelectionToolbar
           position={toolbarPosition}
           onRewrite={handleRewrite}
+          onGraph={handleGraphClick}
           loading={loading}
-          toolbarCustomButtons={[<AIButton key="custom-button" />, 
-        <DiagramButton key="custom-button" />]}
-     />
+          error={error}
+        />
       )}
+
+      {/* Graph handling */}
+      {Object.entries(graphBlocks).map(([blockKey, graphData]) => (
+        <GraphBlock
+          key={blockKey}
+          data={graphData}
+          onClose={() => handleRemoveGraph(blockKey)}
+        />
+      ))}
     </div>
   );
 };
