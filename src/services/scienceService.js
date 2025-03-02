@@ -80,8 +80,42 @@ async function generateDrawingScript(text, diagramType) {
         cleanScript = match[1].trim();
         console.log('Fixed script to start with function declaration');
       } else {
-        console.error('Could not find function declaration in script, falling back');
-        throw new Error('Invalid script format - no function declaration found');
+        console.warn('Could not find function declaration, wrapping script in a function');
+        // No function declaration found, wrap the entire script in a function
+        const functionName = diagramType.charAt(0).toUpperCase() + diagramType.slice(1);
+        cleanScript = `function draw${functionName}Diagram(canvas) {
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  
+  // Clear canvas and set background
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, width, height);
+  
+  // Add title
+  ctx.font = 'bold 24px Arial';
+  ctx.fillStyle = '#333';
+  ctx.textAlign = 'center';
+  ctx.fillText('${functionName} Diagram', width/2, 40);
+  
+  // Set up coordinate system
+  const centerX = width/2;
+  const centerY = height/2;
+  
+  try {
+    // Original AI-generated code
+    ${cleanScript}
+  } catch (error) {
+    console.error('Error in AI-generated code:', error);
+    // Fallback drawing
+    ctx.font = 'bold 20px Arial';
+    ctx.fillStyle = '#d32f2f';
+    ctx.textAlign = 'center';
+    ctx.fillText('Error rendering diagram', width/2, height/2);
+  }
+}`;
+        console.log('Created wrapper function for script');
       }
     }
     
@@ -95,8 +129,30 @@ async function generateDrawingScript(text, diagramType) {
   }
 }
 
-// PubChem API base URL
-const PUBCHEM_API = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
+// PubChem API base URL - use a CORS proxy for direct browser access
+const PUBCHEM_API_DIRECT = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
+const PUBCHEM_API = 'https://cors-anywhere.herokuapp.com/https://pubchem.ncbi.nlm.nih.gov/rest/pug';
+
+// Alternative: Use our own proxy server
+const proxyPubChemRequest = async (url) => {
+  try {
+    // Use our local proxy server instead of direct PubChem access
+    const proxyResponse = await fetch('http://localhost:3001/api/pubchem-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    
+    if (!proxyResponse.ok) {
+      throw new Error(`Proxy server error: ${proxyResponse.status}`);
+    }
+    
+    return proxyResponse;
+  } catch (error) {
+    console.error('Error using PubChem proxy:', error);
+    throw error;
+  }
+};
 
 // Cache for storing generated structures
 const structureCache = new Map();
@@ -135,22 +191,87 @@ export const generateChemicalStructure = async (compound, type = '2D') => {
     if (structureCache.has(cacheKey)) return structureCache.get(cacheKey);
 
     const formattedCompound = validateAndFormatFormula(compound);
-    const compoundData = VALID_COMPOUNDS[formattedCompound];
-    if (!compoundData) throw new Error(`Compound not found: ${formattedCompound}`);
-
+    
+    // First try direct PubChem API lookup without using our predefined list
     try {
-      const imageUrl = `${PUBCHEM_API}/compound/cid/${compoundData.cid}/PNG?record_type=2d&image_size=300`;
-      const response = await fetch(imageUrl, { signal: AbortSignal.timeout(5000) });
-
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const result = { type: 'image', url, alt: `${type} structure of ${compound} (${compoundData.name})`, source: 'pubchem' };
-        structureCache.set(cacheKey, result);
-        return result;
+      console.log('Trying PubChem direct lookup for:', formattedCompound);
+      const pubchemPath = `/compound/name/${encodeURIComponent(formattedCompound)}/cids/JSON`;
+      const searchUrl = `${PUBCHEM_API_DIRECT}${pubchemPath}`;
+      console.log('PubChem search URL:', searchUrl);
+      
+      // Use our proxy server to avoid CORS issues
+      console.log('Fetching from PubChem API via proxy...');
+      const searchResponse = await proxyPubChemRequest(searchUrl);
+      
+      console.log('PubChem API response status:', searchResponse.status);
+      
+      if (searchResponse.ok) {
+        console.log('PubChem response OK, parsing JSON...');
+        const searchData = await searchResponse.json();
+        console.log('PubChem search data:', searchData);
+        
+        if (searchData.IdentifierList && searchData.IdentifierList.CID && searchData.IdentifierList.CID.length > 0) {
+          const cid = searchData.IdentifierList.CID[0];
+          console.log(`Found CID for ${formattedCompound}: ${cid}`);
+          
+          const imagePath = `/compound/cid/${cid}/PNG?record_type=2d&image_size=large`;
+          const imageUrl = `${PUBCHEM_API_DIRECT}${imagePath}`;
+          console.log('Generated image URL:', imageUrl);
+          
+          // Use our proxy server to fetch the image
+          console.log('Fetching image via proxy...');
+          const response = await proxyPubChemRequest(imageUrl);
+          
+          console.log('PubChem image response status:', response.status);
+          
+          if (response.ok) {
+            console.log('PubChem image response OK, converting to blob...');
+            const blob = await response.blob();
+            console.log('PubChem image blob size:', blob.size, 'bytes');
+            console.log('PubChem image blob type:', blob.type);
+            
+            const url = URL.createObjectURL(blob);
+            console.log('Created object URL for image:', url);
+            
+            const result = { 
+              type: 'image', 
+              url, 
+              alt: `${type} structure of ${compound}`, 
+              source: 'pubchem',
+              cid
+            };
+            console.log('Caching and returning PubChem result:', result);
+            structureCache.set(cacheKey, result);
+            return result;
+          }
+        }
       }
-      throw new Error('PubChem request failed');
-    } catch {
+      console.log('PubChem direct lookup failed, trying fallback methods');
+    } catch (pubchemError) {
+      console.error('PubChem direct lookup error:', pubchemError);
+    }
+    
+    // Try our predefined compounds list
+    const compoundData = VALID_COMPOUNDS[formattedCompound];
+    if (compoundData) {
+      try {
+        const imageUrl = `${PUBCHEM_API}/compound/cid/${compoundData.cid}/PNG?record_type=2d&image_size=300`;
+        const response = await fetch(imageUrl, { signal: AbortSignal.timeout(5000) });
+
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const result = { type: 'image', url, alt: `${type} structure of ${compound} (${compoundData.name})`, source: 'pubchem' };
+          structureCache.set(cacheKey, result);
+          return result;
+        }
+      } catch (predefinedError) {
+        console.error('Predefined compound lookup error:', predefinedError);
+      }
+    }
+    
+    // Final fallback to SmilesDrawer if we have the compound data
+    if (compoundData && compoundData.smiles) {
       console.log('Fallback to SmilesDrawer');
       const canvas = document.createElement('canvas');
       canvas.width = 300;
@@ -175,6 +296,8 @@ export const generateChemicalStructure = async (compound, type = '2D') => {
       structureCache.set(cacheKey, result);
       return result;
     }
+    
+    throw new Error(`Compound not found: ${formattedCompound}`);
   } catch (error) {
     console.error('Error generating chemical structure:', error);
     throw error;

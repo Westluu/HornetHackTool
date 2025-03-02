@@ -1,17 +1,49 @@
 import { convertFromRaw, convertToRaw, EditorState, Modifier, ContentState, ContentBlock, genKey } from 'draft-js';
-import { generateChemicalStructure, generatePhysicsDiagram } from '../../services/scienceService';
-import GraphBlock from './GraphBlock';
-import CanvasBlock from './CanvasBlock';
-import TestBlock from './TestBlock';
-import LoadingBlock from './LoadingBlock';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
 import { useParams } from 'react-router-dom';
 import { getDocument, saveDocument } from '../../services/localStorageService';
 import { rewriteText } from '../../services/aiService';
-
+import { generateChemicalStructure, generatePhysicsDiagram } from '../../services/scienceService';
+import GraphBlock from './GraphBlock';
+import CanvasBlock from './CanvasBlock';
+import TestBlock from './TestBlock';
+import LoadingBlock from './LoadingBlock';
 import SelectionToolbar from './SelectionToolbar';
+
+// Simple component for displaying chemical structure images
+const ImageBlock = (props) => {
+  // Extract src and alt from blockProps or direct props
+  const src = props.blockProps?.src || props.src;
+  const alt = props.blockProps?.alt || props.alt;
+  const onRemove = props.blockProps?.onRemove;
+  
+  if (!src) {
+    console.warn('ImageBlock: Missing src prop', props);
+    return null;
+  }
+  
+  return (
+    <div className='w-full my-4 flex justify-center relative'>
+      <div className='bg-white rounded-lg shadow-lg p-4 text-center'>
+        <img src={src} alt={alt || 'Chemical structure'} className='max-w-full' />
+        {alt && <p className='mt-2 text-sm text-gray-600'>{alt}</p>}
+        
+        {/* Delete button */}
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            className='absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full hover:bg-red-600 flex items-center justify-center'
+            title='Delete chemical structure'
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const TextEditor = () => {
   const [editorState, setEditorState] = useState(EditorState.createEmpty());
@@ -50,14 +82,116 @@ const TextEditor = () => {
           }
         };
       } else if (entity.getType() === 'IMAGE_BLOCK' || entityData.type === 'image') {
-        return {
-          component: GraphBlock,
-          editable: false,
-          props: {
+        // Check if this is a chemical structure image from PubChem
+        if (entityData.source === 'pubchem') {
+          console.log('Rendering chemical structure from PubChem', entityData);
+          const blockProps = {
             src: entityData.url,
-            alt: entityData.alt
-          }
-        };
+            alt: entityData.alt,
+            onRemove: () => {
+              // Create a new editor state without this atomic block
+              try {
+                console.log('Removing chemical structure block with key:', block.getKey());
+                const content = editorState.getCurrentContent();
+                
+                // Get the current selection
+                const selection = editorState.getSelection();
+                
+                // Create a selection that targets only this block
+                const targetRange = selection.merge({
+                  anchorKey: block.getKey(),
+                  anchorOffset: 0,
+                  focusKey: block.getKey(),
+                  focusOffset: block.getLength(),
+                });
+                
+                // Create a new state with the selection targeting the block to remove
+                const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+                
+                // Remove the selected content (the atomic block)
+                const newContent = Modifier.removeRange(
+                  content,
+                  targetRange,
+                  'backward'
+                );
+                
+                // Create the new editor state with the block removed
+                const newState = EditorState.push(
+                  stateWithSelection,
+                  newContent,
+                  'remove-range'
+                );
+                
+                // Set the new state
+                setEditorState(newState);
+                console.log('Chemical structure removed successfully');
+              } catch (error) {
+                console.error('Error removing chemical structure:', error);
+              }
+            }
+          };
+          console.log('ImageBlock props being passed:', blockProps);
+          return {
+            component: ImageBlock,
+            editable: false,
+            props: blockProps,
+            blockProps: blockProps  // Try passing props both ways
+          };
+        } else {
+          // Use GraphBlock for other types of images/graphs
+          const graphProps = {
+            src: entityData.url,
+            alt: entityData.alt,
+            equation: entityData.equation, // For compatibility with GraphBlock
+            onRemove: () => {
+              // Create a new editor state without this atomic block
+              try {
+                console.log('Removing graph block with key:', block.getKey());
+                const content = editorState.getCurrentContent();
+                
+                // Get the current selection
+                const selection = editorState.getSelection();
+                
+                // Create a selection that targets only this block
+                const targetRange = selection.merge({
+                  anchorKey: block.getKey(),
+                  anchorOffset: 0,
+                  focusKey: block.getKey(),
+                  focusOffset: block.getLength(),
+                });
+                
+                // Create a new state with the selection targeting the block to remove
+                const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+                
+                // Remove the selected content (the atomic block)
+                const newContent = Modifier.removeRange(
+                  content,
+                  targetRange,
+                  'backward'
+                );
+                
+                // Create the new editor state with the block removed
+                const newState = EditorState.push(
+                  stateWithSelection,
+                  newContent,
+                  'remove-range'
+                );
+                
+                // Set the new state
+                setEditorState(newState);
+                console.log('Graph removed successfully');
+              } catch (error) {
+                console.error('Error removing graph:', error);
+              }
+            }
+          };
+          return {
+            component: GraphBlock,
+            editable: false,
+            props: graphProps,
+            blockProps: graphProps
+          };
+        }
       } else if (entity.getType() === 'TEST_BLOCK') {
         console.log('TextEditor: Rendering TEST_BLOCK entity with data:', entityData);
         return {
@@ -134,6 +268,13 @@ const TextEditor = () => {
       setError(null);
       setLoading(true);
       
+      // Set flag to prevent toolbar from disappearing
+      setIsGeneratingDiagram(true);
+      
+      // Preserve the toolbar position during diagram generation
+      // We're setting the isGeneratingDiagram flag instead of using this variable directly
+      // const currentToolbarPosition = toolbarPosition;
+      
       const contentState = editorState.getCurrentContent();
       const selection = editorState.getSelection();
       let selectedText = getSelectedText(contentState, selection);
@@ -162,7 +303,8 @@ const TextEditor = () => {
       console.log('Generating diagram for field:', field, 'type:', type);
       
       if (field.toLowerCase() === 'chemistry') {
-        console.log('Generating chemical structure');
+        console.log('Generating chemical structure using PubChem');
+        // Use the enhanced chemical structure generator that now uses PubChem
         result = await generateChemicalStructure(selectedText, type.toUpperCase());
       } else if (field.toLowerCase() === 'physics') {
         console.log('Generating physics diagram');
@@ -278,9 +420,53 @@ const TextEditor = () => {
       setError(error.message || 'Failed to generate diagram');
     } finally {
       setLoading(false);
+      
+      // Keep the toolbar visible after diagram generation completes
+      // by not immediately updating the editor state
+      setTimeout(() => {
+        // Only update if we still have a valid selection
+        const currentSelection = editorState.getSelection();
+        if (currentSelection && !currentSelection.isCollapsed()) {
+          console.log('Preserving toolbar after diagram generation');
+        }
+        
+        // Reset the flag after a short delay
+        setTimeout(() => {
+          setIsGeneratingDiagram(false);
+        }, 200);
+      }, 100);
     }
   };
 
+  // Create a ref for the toolbar to prevent it from disappearing
+  const toolbarRef = useRef(null);
+  
+  // Flag to prevent toolbar position reset during science diagram generation
+  const [isGeneratingDiagram, setIsGeneratingDiagram] = useState(false);
+  
+  // Memoize the function to check if a click is inside the toolbar
+  const isClickInsideToolbar = useCallback((event) => {
+    return toolbarRef.current && toolbarRef.current.contains(event.target);
+  }, []);
+  
+  // Handle clicks outside the toolbar
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // If click is outside toolbar and we're not generating a diagram, hide the toolbar
+      if (!isClickInsideToolbar(event) && !isGeneratingDiagram) {
+        setToolbarPosition(null);
+      }
+    };
+    
+    // Add event listener
+    document.addEventListener('mousedown', handleClickOutside);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isClickInsideToolbar, isGeneratingDiagram]);
+  
   const handleEditorStateChange = async (newEditorState) => {
     setEditorState(newEditorState);
     
@@ -294,29 +480,42 @@ const TextEditor = () => {
       hasEntity: block.getEntityAt(0) !== null
     })));
     
-    // Check for text selection
-    const selection = newEditorState.getSelection();
-    const selectedText = getSelectedText(contentState, selection);
+    // Save the document content
+    await saveDocumentContent(newEditorState);
+    
+    // Only update toolbar position if we're not in the middle of generating a diagram
+    if (!isGeneratingDiagram) {
+      // Check for text selection
+      const selection = newEditorState.getSelection();
+      
+      try {
+        if (selection && !selection.isCollapsed()) {
+          const selectedText = getSelectedText(contentState, selection);
+          
+          if (selectedText) {
+            const domSelection = window.getSelection();
+            if (domSelection && domSelection.rangeCount > 0) {
+              const selectionRect = domSelection.getRangeAt(0).getBoundingClientRect();
+              const windowHeight = window.innerHeight;
+              const toolbarHeight = 300; // Approximate height of toolbar
 
-    if (selectedText && !selection.isCollapsed()) {
-      const selection = window.getSelection();
-      if (selection.rangeCount > 0) {
-        const selectionRect = selection.getRangeAt(0).getBoundingClientRect();
-        const windowHeight = window.innerHeight;
-        const toolbarHeight = 300; // Approximate height of toolbar
-
-        // If selection is in bottom half of screen, show toolbar above selection
-        const isNearBottom = selectionRect.top > windowHeight - toolbarHeight - 100;
-        
-        setToolbarPosition({
-          top: isNearBottom ? selectionRect.top - toolbarHeight - 10 : selectionRect.top + window.scrollY
-        });
+              // If selection is in bottom half of screen, show toolbar above selection
+              const isNearBottom = selectionRect.top > windowHeight - toolbarHeight - 100;
+              
+              setToolbarPosition({
+                top: isNearBottom ? selectionRect.top - toolbarHeight - 10 : selectionRect.top + window.scrollY
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error handling selection:', error);
       }
-    } else {
-      setToolbarPosition(null);
     }
+  };
 
-    // Save document
+  // Save document directly in the handleEditorStateChange function
+  const saveDocumentContent = async (newEditorState) => {
     try {
       if (id) {
         const existingDoc = await getDocument(id);
@@ -636,37 +835,128 @@ const TextEditor = () => {
   );
 
   const handleRemoveGraph = (blockKey) => {
-    // Remove the graph block from state
-    const newGraphBlocks = { ...graphBlocks };
-    delete newGraphBlocks[blockKey];
-    setGraphBlocks(newGraphBlocks);
-  };
-
-  const handleRemoveCanvasBlock = (blockKey) => {
-    // Remove the canvas block from the editor state
-    const contentState = editorState.getCurrentContent();
-    const blocks = contentState.getBlocksAsArray();
-    
-    // Find the block with the given key
-    const blockIndex = blocks.findIndex(block => block.getKey() === blockKey);
-    
-    if (blockIndex !== -1) {
-      // Create a new array without the block to be removed
-      const newBlocks = [...blocks];
-      newBlocks.splice(blockIndex, 1);
+    console.log('Removing graph with key:', blockKey);
+    try {
+      // Get the current content state and selection
+      const content = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
       
-      // Create a new content state with the updated blocks
-      const newContentState = ContentState.createFromBlockArray(newBlocks);
+      // Create a selection that targets only this block
+      const targetRange = selection.merge({
+        anchorKey: blockKey,
+        anchorOffset: 0,
+        focusKey: blockKey,
+        focusOffset: content.getBlockForKey(blockKey).getLength(),
+      });
       
-      // Push the new content state to the editor
-      const newEditorState = EditorState.push(
-        editorState,
-        newContentState,
+      // Create a new state with the selection targeting the block to remove
+      const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+      
+      // Remove the selected content (the atomic block)
+      const newContent = Modifier.removeRange(
+        content,
+        targetRange,
+        'backward'
+      );
+      
+      // Create the new editor state with the block removed
+      const newState = EditorState.push(
+        stateWithSelection,
+        newContent,
         'remove-range'
       );
       
-      // Update the editor state
-      handleEditorStateChange(newEditorState);
+      // Set the new state
+      setEditorState(newState);
+      
+      // Also remove from graphBlocks state
+      const updatedGraphBlocks = { ...graphBlocks };
+      delete updatedGraphBlocks[blockKey];
+      setGraphBlocks(updatedGraphBlocks);
+      
+      console.log('Graph removed successfully');
+    } catch (error) {
+      console.error('Error removing graph:', error);
+      // Fallback to the old method if the new method fails
+      try {
+        // Remove the graph block from state only
+        const newGraphBlocks = { ...graphBlocks };
+        delete newGraphBlocks[blockKey];
+        setGraphBlocks(newGraphBlocks);
+        console.log('Graph removed using fallback method');
+      } catch (fallbackError) {
+        console.error('Fallback method also failed:', fallbackError);
+      }
+    }
+  };
+
+  const handleRemoveCanvasBlock = (blockKey) => {
+    console.log('Removing canvas block with key:', blockKey);
+    try {
+      // Get the current content state and selection
+      const content = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
+      
+      // Create a selection that targets only this block
+      const targetRange = selection.merge({
+        anchorKey: blockKey,
+        anchorOffset: 0,
+        focusKey: blockKey,
+        focusOffset: content.getBlockForKey(blockKey).getLength(),
+      });
+      
+      // Create a new state with the selection targeting the block to remove
+      const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+      
+      // Remove the selected content (the atomic block)
+      const newContent = Modifier.removeRange(
+        content,
+        targetRange,
+        'backward'
+      );
+      
+      // Create the new editor state with the block removed
+      const newState = EditorState.push(
+        stateWithSelection,
+        newContent,
+        'remove-range'
+      );
+      
+      // Set the new state
+      setEditorState(newState);
+      console.log('Canvas block removed successfully');
+    } catch (error) {
+      console.error('Error removing canvas block:', error);
+      // Fallback to the old method if the new method fails
+      try {
+        const contentState = editorState.getCurrentContent();
+        const blocks = contentState.getBlocksAsArray();
+        
+        // Find the block with the given key
+        const blockIndex = blocks.findIndex(block => block.getKey() === blockKey);
+        
+        if (blockIndex !== -1) {
+          // Create a new array without the block to be removed
+          const newBlocks = [...blocks];
+          newBlocks.splice(blockIndex, 1);
+          
+          // Create a new content state with the updated blocks
+          const newContentState = ContentState.createFromBlockArray(newBlocks);
+          
+          // Push the new content state to the editor
+          const newEditorState = EditorState.push(
+            editorState,
+            newContentState,
+            'remove-range'
+          );
+          
+          // Update the editor state
+          setEditorState(newEditorState);
+          console.log('Canvas block removed using fallback method');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback method also failed:', fallbackError);
+      }
     }
   };
 
@@ -767,8 +1057,9 @@ const TextEditor = () => {
         />
 
         {/* Selection toolbar */}
-        {toolbarPosition && (
+        {toolbarPosition && editorState.getSelection() && !editorState.getSelection().isCollapsed() && (
           <SelectionToolbar
+            ref={toolbarRef}
             position={toolbarPosition}
             onRewrite={handleRewrite}
             onGraph={handleGraphClick}

@@ -72,7 +72,56 @@ console.log('Scaleway API Key:', process.env.SCALEWAY_API_KEY ? 'Present' : 'Mis
 
 
 
-// Proxy PubChem API requests
+// General PubChem API proxy endpoint
+app.post('/api/pubchem-proxy', async (req, res) => {
+  try {
+    const { url } = req.body;
+    
+    if (!url || !url.includes('pubchem.ncbi.nlm.nih.gov')) {
+      return res.status(400).json({ error: 'Invalid PubChem URL' });
+    }
+    
+    console.log('Proxying PubChem request:', url);
+    
+    console.log('Sending request to PubChem...');
+    const response = await forwardPubChemRequest(url);
+    
+    const contentType = response.headers.get('content-type');
+    console.log('PubChem response content type:', contentType);
+    console.log('PubChem response status:', response.status);
+    
+    // Log all headers for debugging
+    console.log('PubChem response headers:');
+    response.headers.forEach((value, name) => {
+      console.log(`${name}: ${value}`);
+    });
+    
+    // Forward the response with the appropriate content type
+    res.set('Content-Type', contentType);
+    
+    if (contentType && contentType.includes('application/json')) {
+      console.log('Processing JSON response from PubChem');
+      const data = await response.json();
+      console.log('PubChem JSON data:', JSON.stringify(data).substring(0, 500) + '...');
+      return res.json(data);
+    } else if (contentType && contentType.includes('image')) {
+      console.log('Processing image response from PubChem');
+      const buffer = await response.buffer();
+      console.log('PubChem image received, size:', buffer.length, 'bytes');
+      return res.send(buffer);
+    } else {
+      console.log('Processing text response from PubChem');
+      const text = await response.text();
+      console.log('PubChem text response:', text.substring(0, 500) + '...');
+      return res.send(text);
+    }
+  } catch (error) {
+    console.error('PubChem proxy error:', error);
+    res.status(500).json({ error: 'Failed to proxy PubChem request', details: error.message });
+  }
+});
+
+// Specific PubChem PNG endpoint (legacy)
 app.get('/api/pubchem/compound/cid/:cid/record/PNG', async (req, res) => {
   try {
     const { cid } = req.params;
@@ -190,10 +239,10 @@ Given a description of a physics problem or scenario, generate clean JavaScript 
 Your code will be executed in a browser environment where a canvas element is already available.
 
 CRITICAL REQUIREMENTS:
-1. ONLY return valid JavaScript code with NO markdown formatting, NO explanation text, and NO code blocks.
+1. ONLY return valid JavaScript code with NO markdown formatting, NO explanation text, and NO code blocks. Your response MUST start with a function declaration.
 2. Your code must be clean, efficient, and properly handle the canvas context.
 3. Use appropriate colors that CONTRAST WELL with the background - avoid light colors on light backgrounds.
-4. Include any necessary physics formulas or equations as text on the canvas.
+4. CRITICAL: Always place any necessary physics formulas or equations on the LEFT SIDE of the canvas.
 5. Do not use external libraries or images.
 6. Your code should be self-contained and draw the complete diagram.
 7. Do not include any HTML, only JavaScript.
@@ -204,7 +253,7 @@ CRITICAL REQUIREMENTS:
 12. Add a title at the top of the diagram describing what is being shown.
 13. Use consistent styling for similar elements.
 14. Include a coordinate system or reference points when appropriate.
-15. CRITICAL: Position any explanatory text, legends, or labels DIRECTLY ON the diagram in a way that doesn't obstruct the main elements.
+15. CRITICAL: Position any explanatory text, legends, or labels DIRECTLY ON the diagram in a way that doesn't obstruct the main elements. ALWAYS place equations on the LEFT SIDE of the diagram.
 16. Use the FULL canvas width for the diagram - no side panel is needed.
 17. IMPORTANT: Use a color palette with strong contrast - dark colors (like #222, #333, #444) for elements on light backgrounds.
 18. For vectors and important elements, use vibrant colors like #d32f2f (red), #1976d2 (blue), #388e3c (green), #7b1fa2 (purple).
@@ -214,7 +263,7 @@ CRITICAL REQUIREMENTS:
 22. IMPORTANT: Scale all drawing elements much larger than normal - vectors, shapes, and components should be at least 2-3x larger than standard size.
 23. Text labels should be larger (18-24px font size) and bold for better visibility.
 
-Your function should start with:
+Your response MUST start with this exact function declaration format:
 
 function draw[DiagramType]Diagram(canvas) {
   const ctx = canvas.getContext('2d');
@@ -240,18 +289,19 @@ function draw[DiagramType]Diagram(canvas) {
   // Your drawing code here
 }
 
-draw[DiagramType]Diagram(canvas);
+// DO NOT include this line in your response:
+// draw[DiagramType]Diagram(canvas);
 `;      
       
       if (diagramType === 'force') {
         systemPrompt = basePrompt.replace(/\[DiagramType\]/g, 'Force').replace('[Title of Physics Diagram]', 'Force Diagram Analysis') + 
-        '\n\nFor force diagrams, make sure to:\n1. Draw each force as a vector with proper direction and magnitude\n2. Use different colors for different forces\n3. Label each force with its name and value if provided\n4. Include a legend explaining the forces\n5. Show the resultant force if applicable\n6. Ensure all objects are clearly drawn and labeled\n7. Include any relevant physics equations';
+        '\n\nFor force diagrams, make sure to:\n1. Draw each force as a vector with proper direction and magnitude\n2. Use different colors for different forces\n3. Label each force with its name and value if provided\n4. Include a legend explaining the forces\n5. Show the resultant force if applicable\n6. Ensure all objects are clearly drawn and labeled\n7. CRITICAL: Place all equations and formulas on the LEFT SIDE of the diagram';
       } else if (diagramType === 'circuit') {
         systemPrompt = basePrompt.replace(/\[DiagramType\]/g, 'Circuit').replace('[Title of Physics Diagram]', 'Circuit Diagram Analysis') + 
-        '\n\nFor circuit diagrams, make sure to:\n1. Use standard electrical symbols for components\n2. Draw wires as straight lines with 90-degree turns\n3. Label each component with its name and value\n4. Include a legend explaining the components\n5. Show voltage sources, current directions, and resistances\n6. Use different colors for different circuit paths\n7. Include any relevant electrical equations';
+        '\n\nFor circuit diagrams, make sure to:\n1. Use standard electrical symbols for components\n2. Draw wires as straight lines with 90-degree turns\n3. Label each component with its name and value\n4. Include a legend explaining the components\n5. Show voltage sources, current directions, and resistances\n6. Use different colors for different circuit paths\n7. CRITICAL: Place all equations and formulas on the LEFT SIDE of the diagram';
       } else {
         systemPrompt = basePrompt.replace(/\[DiagramType\]/g, diagramType.charAt(0).toUpperCase() + diagramType.slice(1)).replace('[Title of Physics Diagram]', `${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)} Diagram Analysis`) + 
-        `\n\nFor ${diagramType} diagrams, make sure to:\n1. Include all relevant physical elements\n2. Use appropriate symbols and notations\n3. Label all important parts\n4. Show relationships between different elements\n5. Include a legend if necessary\n6. Use different colors to distinguish different aspects\n7. Include any relevant physics equations`;
+        `\n\nFor ${diagramType} diagrams, make sure to:\n1. Include all relevant physical elements\n2. Use appropriate symbols and notations\n3. Label all important parts\n4. Show relationships between different elements\n5. Include a legend if necessary\n6. Use different colors to distinguish different aspects\n7. CRITICAL: Place all equations and formulas on the LEFT SIDE of the diagram`;
       }
       
       const completion = await client.chat.completions.create({

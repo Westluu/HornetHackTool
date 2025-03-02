@@ -52,10 +52,9 @@ const CanvasBlock = ({ blockProps }) => {
           const diagramType = blockProps.diagramType;
           const rawScript = blockProps.rawScript;
           
-          // Validate the script starts with a function declaration
+          // Log if the script doesn't start with a function declaration (but don't throw an error)
           if (!rawScript.trim().startsWith('function')) {
-            console.error('CanvasBlock: Script does not start with a function declaration');
-            throw new Error('Invalid script format - must start with a function declaration');
+            console.warn('CanvasBlock: Script does not start with a function declaration, but will try to execute anyway');
           }
           
           // Create a function from the script string
