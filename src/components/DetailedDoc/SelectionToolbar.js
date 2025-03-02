@@ -19,7 +19,7 @@ const STYLES = {
   CONCISE: 'concise'
 };
 
-const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGraph, onScienceDiagram }, ref) => {
+const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGraph, onScienceDiagram, setDiagramRequestedFromToolbar }, ref) => {
   const [mode, setMode] = useState(MODES.TEXT);
   const [scienceField, setScienceField] = useState(SCIENCE_FIELDS.CHEMISTRY);
   
@@ -43,6 +43,7 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
         top: `${position.top}px`,
       }}
       onMouseDown={handleMouseDown}
+      data-toolbar="true"
     >
       {/* Mode Toggle Buttons */}
       <div className="flex gap-2 mb-4">
@@ -172,9 +173,27 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.preventDefault();
                   e.stopPropagation();
                   console.log('2D Structure button clicked');
-                  onScienceDiagram('chemistry', '2d');
+                  
+                  // Clear any flags that might prevent diagram generation
+                  window.lastClickFromBelowDiagramArea = false;
+                  window.typingBelowDiagram = false;
+                  
+                  // Set the flag and immediately call the diagram generation function
+                  if (setDiagramRequestedFromToolbar) {
+                    setDiagramRequestedFromToolbar(true);
+                  }
+                  
+                  // Add data attributes to the event to mark it as coming from the toolbar
+                  e.diagramRequest = true;
+                  e.diagramType = '2d';
+                  e.fromToolbarButton = true; // Add this flag to explicitly mark it as a toolbar button click
+                  
+                  // Call the diagram generation function immediately and pass the event
+                  onScienceDiagram('chemistry', '2d', e);
                 }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+                data-toolbar-button="true"
+                data-diagram-type="2d"
               >
                 <span className="font-medium text-gray-800">2D Structure</span>
                 <span className="text-xs text-gray-500">Generate a 2D molecular structure</span>
@@ -184,9 +203,27 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.preventDefault();
                   e.stopPropagation();
                   console.log('3D Structure button clicked');
-                  onScienceDiagram('chemistry', '3d');
+                  
+                  // Clear any flags that might prevent diagram generation
+                  window.lastClickFromBelowDiagramArea = false;
+                  window.typingBelowDiagram = false;
+                  
+                  // Set the flag and immediately call the diagram generation function
+                  if (setDiagramRequestedFromToolbar) {
+                    setDiagramRequestedFromToolbar(true);
+                  }
+                  
+                  // Add data attributes to the event to mark it as coming from the toolbar
+                  e.diagramRequest = true;
+                  e.diagramType = '3d';
+                  e.fromToolbarButton = true; // Add this flag to explicitly mark it as a toolbar button click
+                  
+                  // Call the diagram generation function immediately and pass the event
+                  onScienceDiagram('chemistry', '3d', e);
                 }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+                data-toolbar-button="true"
+                data-diagram-type="3d"
               >
                 <span className="font-medium text-gray-800">3D Structure</span>
                 <span className="text-xs text-gray-500">Generate a 3D molecular structure</span>
@@ -201,9 +238,27 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.preventDefault();
                   e.stopPropagation();
                   console.log('Force diagram button clicked');
-                  onScienceDiagram('physics', 'force');
+                  
+                  // Clear any flags that might prevent diagram generation
+                  window.lastClickFromBelowDiagramArea = false;
+                  window.typingBelowDiagram = false;
+                  
+                  // Set the flag and immediately call the diagram generation function
+                  if (setDiagramRequestedFromToolbar) {
+                    setDiagramRequestedFromToolbar(true);
+                  }
+                  
+                  // Add data attributes to the event to mark it as coming from the toolbar
+                  e.diagramRequest = true;
+                  e.diagramType = 'force';
+                  e.fromToolbarButton = true; // Add this flag to explicitly mark it as a toolbar button click
+                  
+                  // Call the diagram generation function immediately and pass the event
+                  onScienceDiagram('physics', 'force', e);
                 }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+                data-toolbar-button="true"
+                data-diagram-type="force"
               >
                 <span className="font-medium text-gray-800">Force Diagram</span>
                 <span className="text-xs text-gray-500">Create a force diagram</span>
@@ -213,9 +268,27 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.preventDefault();
                   e.stopPropagation();
                   console.log('Circuit diagram button clicked');
-                  onScienceDiagram('physics', 'circuit');
+                  
+                  // Clear any flags that might prevent diagram generation
+                  window.lastClickFromBelowDiagramArea = false;
+                  window.typingBelowDiagram = false;
+                  
+                  // Set the flag and immediately call the diagram generation function
+                  if (setDiagramRequestedFromToolbar) {
+                    setDiagramRequestedFromToolbar(true);
+                  }
+                  
+                  // Add data attributes to the event to mark it as coming from the toolbar
+                  e.diagramRequest = true;
+                  e.diagramType = 'circuit';
+                  e.fromToolbarButton = true; // Add this flag to explicitly mark it as a toolbar button click
+                  
+                  // Call the diagram generation function immediately and pass the event
+                  onScienceDiagram('physics', 'circuit', e);
                 }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+                data-toolbar-button="true"
+                data-diagram-type="circuit"
               >
                 <span className="font-medium text-gray-800">Circuit Diagram</span>
                 <span className="text-xs text-gray-500">Create a circuit diagram</span>
@@ -225,9 +298,27 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.preventDefault();
                   e.stopPropagation();
                   console.log('Kinematics diagram button clicked');
-                  onScienceDiagram('physics', 'kinematics');
+                  
+                  // Clear any flags that might prevent diagram generation
+                  window.lastClickFromBelowDiagramArea = false;
+                  window.typingBelowDiagram = false;
+                  
+                  // Set the flag and immediately call the diagram generation function
+                  if (setDiagramRequestedFromToolbar) {
+                    setDiagramRequestedFromToolbar(true);
+                  }
+                  
+                  // Add data attributes to the event to mark it as coming from the toolbar
+                  e.diagramRequest = true;
+                  e.diagramType = 'kinematics';
+                  e.fromToolbarButton = true; // Add this flag to explicitly mark it as a toolbar button click
+                  
+                  // Call the diagram generation function immediately and pass the event
+                  onScienceDiagram('physics', 'kinematics', e);
                 }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+                data-toolbar-button="true"
+                data-diagram-type="kinematics"
               >
                 <span className="font-medium text-gray-800">Kinematics Diagram</span>
                 <span className="text-xs text-gray-500">Create a kinematics diagram</span>

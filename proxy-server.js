@@ -127,12 +127,18 @@ app.get('/api/pubchem/compound/cid/:cid/record/PNG', async (req, res) => {
     const { cid } = req.params;
     const { record_type, image_size } = req.query;
     
-    let url = `${PUBCHEM_BASE_URL}/compound/cid/${cid}/PNG`;
+    // Use the correct URL format for 3D structures
+    let url;
     const params = new URLSearchParams();
     
     if (record_type === '3d') {
+      url = `${PUBCHEM_BASE_URL}/compound/cid/${cid}/record/PNG`;
       params.append('record_type', '3d');
+    } else {
+      url = `${PUBCHEM_BASE_URL}/compound/cid/${cid}/PNG`;
+      params.append('record_type', '2d');
     }
+    
     if (image_size) {
       params.append('image_size', image_size);
     }
@@ -144,7 +150,7 @@ app.get('/api/pubchem/compound/cid/:cid/record/PNG', async (req, res) => {
     
     url += `?${params.toString()}`;
     
-    console.log('Fetching structure from PubChem:', url);
+    console.log('Proxying PubChem request:', url);
     
     const response = await fetchWithRetry(url, {
       headers: {
@@ -171,6 +177,8 @@ app.get('/api/pubchem/compound/cid/:cid/record/PNG', async (req, res) => {
   }
 });
 
+// We're now handling SDF data in the general PubChem endpoint
+
 // Proxy PubChem API requests - fallback for other endpoints
 app.get('/api/pubchem/*', async (req, res) => {
   try {
@@ -192,14 +200,31 @@ app.get('/api/pubchem/*', async (req, res) => {
     }
 
     const contentType = response.headers.get('content-type');
+    
+    // Handle SDF files (chemical structure data)
+    if (url.includes('/SDF') || contentType?.includes('chemical/x-mdl-sdfile')) {
+      const text = await response.text();
+      res.type('chemical/x-mdl-sdfile').send(text);
+      return;
+    }
+    
+    // Handle plain text responses
     if (contentType?.includes('text/plain')) {
       const text = await response.text();
       res.type('text').send(text);
       return;
     }
 
-    const data = await response.json();
-    res.json(data);
+    // For everything else, try to parse as JSON
+    try {
+      const data = await response.json();
+      res.json(data);
+    } catch (jsonError) {
+      // If JSON parsing fails, return as text
+      console.warn('Failed to parse response as JSON, returning as text:', jsonError.message);
+      const text = await response.text();
+      res.type('text').send(text);
+    }
   } catch (error) {
     console.error('PubChem API error:', error);
     res.status(500).json({

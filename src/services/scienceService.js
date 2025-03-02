@@ -1,4 +1,54 @@
 import SmilesDrawer from 'smiles-drawer';
+import { generateChemicalStructureScript } from './pubchemService';
+
+/**
+ * Generate a 3D chemical structure using PubChem
+ */
+export const generate3DChemicalStructure = async (compound) => {
+  try {
+    console.log(`Generating 3D chemical structure for: ${compound}`);
+    
+    // Use the imported function from pubchemService
+    const result = await generateChemicalStructureScript(compound, true);
+    
+    if (result.success) {
+      console.log('Successfully generated 3D chemical structure script');
+      return { 
+        type: 'canvas', 
+        rawScript: result.script, 
+        diagramType: 'chemical3d',
+        structureInfo: result.structureInfo
+      };
+    } else {
+      console.warn('Failed to generate 3D structure, falling back to 2D');
+      // Try to generate a 2D structure instead
+      try {
+        const fallbackResult = await generateChemicalStructure(compound, '2D');
+        console.log('Successfully generated 2D fallback');
+        return fallbackResult;
+      } catch (fallbackError) {
+        console.error('Error generating 2D fallback:', fallbackError);
+        // If 2D also fails, return the original fallback
+        return { 
+          type: 'canvas', 
+          rawScript: result.script, 
+          diagramType: 'chemical2d',
+          fallback: true
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Error generating 3D chemical structure:', error);
+    // Try to generate a 2D structure as a fallback
+    try {
+      console.log('Attempting to generate 2D structure as fallback');
+      return await generateChemicalStructure(compound, '2D');
+    } catch (fallbackError) {
+      console.error('Fallback to 2D also failed:', fallbackError);
+      throw error; // Throw the original error if fallback also fails
+    }
+  }
+};
 
 /**
  * Generate a JavaScript drawing script using AI
