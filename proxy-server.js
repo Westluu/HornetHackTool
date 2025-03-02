@@ -2,6 +2,52 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
+const fetch = require('node-fetch');
+
+// PubChem API base URL
+const PUBCHEM_BASE_URL = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
+
+// Helper function to handle PubChem requests with retries
+async function fetchWithRetry(url, options, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return response;
+    } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error);
+      if (i === retries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+}
+
+// Helper function to forward PubChem requests
+async function forwardPubChemRequest(url) {
+  try {
+    console.log('Requesting:', url);
+    const response = await fetch(url, {
+      headers: {
+        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (compatible; GoogleDocsClone/1.0; +http://localhost)',
+      },
+      timeout: 10000 // 10 second timeout
+    });
+
+    if (!response.ok) {
+      throw new Error(`PubChem API error: ${response.status}`);
+    }
+
+    return response;
+  } catch (error) {
+    if (error.code === 'ENOTFOUND') {
+      throw new Error('Unable to connect to PubChem API. Please check your internet connection.');
+    }
+    throw error;
+  }
+}
 
 const app = express();
 
@@ -25,6 +71,94 @@ const client = new OpenAI({
 console.log('Scaleway API Key:', process.env.SCALEWAY_API_KEY ? 'Present' : 'Missing');
 
 
+
+// Proxy PubChem API requests
+app.get('/api/pubchem/compound/cid/:cid/record/PNG', async (req, res) => {
+  try {
+    const { cid } = req.params;
+    const { record_type, image_size } = req.query;
+    
+    let url = `${PUBCHEM_BASE_URL}/compound/cid/${cid}/PNG`;
+    const params = new URLSearchParams();
+    
+    if (record_type === '3d') {
+      params.append('record_type', '3d');
+    }
+    if (image_size) {
+      params.append('image_size', image_size);
+    }
+    
+    // Always set these for better quality
+    params.append('image_size', 'large');
+    params.append('width', '800');
+    params.append('height', '800');
+    
+    url += `?${params.toString()}`;
+    
+    console.log('Fetching structure from PubChem:', url);
+    
+    const response = await fetchWithRetry(url, {
+      headers: {
+        'Accept': 'image/png',
+        'User-Agent': 'Mozilla/5.0 (compatible; GoogleDocsClone/1.0; +http://localhost)',
+        'Cache-Control': 'no-cache'
+      },
+      timeout: 5000
+    });
+    
+    if (!response.ok) {
+      throw new Error(`PubChem API error: ${response.status}`);
+    }
+    
+    const buffer = await response.buffer();
+    res.set('Content-Type', 'image/png');
+    res.send(buffer);
+  } catch (error) {
+    console.error('PubChem API error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch structure from PubChem API',
+      details: error.message
+    });
+  }
+});
+
+// Proxy PubChem API requests - fallback for other endpoints
+app.get('/api/pubchem/*', async (req, res) => {
+  try {
+    const pubchemPath = req.url.replace('/api/pubchem/', '');
+    const url = `${PUBCHEM_BASE_URL}/${pubchemPath}`;
+    console.log('Fetching from PubChem:', url);
+
+    const response = await fetchWithRetry(url, {
+      headers: {
+        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (compatible; GoogleDocsClone/1.0; +http://localhost)',
+        'Cache-Control': 'no-cache'
+      },
+      timeout: 5000
+    });
+    
+    if (!response.ok) {
+      throw new Error(`PubChem API error: ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (contentType?.includes('text/plain')) {
+      const text = await response.text();
+      res.type('text').send(text);
+      return;
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('PubChem API error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch from PubChem API',
+      details: error.message
+    });
+  }
+});
 
 app.post('/api/generate', async (req, res) => {
   console.log('\n=== New Request ===');

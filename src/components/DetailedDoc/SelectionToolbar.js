@@ -2,7 +2,24 @@ import React, { useState } from 'react';
 
 const MODES = {
   TEXT: 'text',
-  EQUATION: 'equation'
+  EQUATION: 'equation',
+  SCIENCE: 'science'
+};
+
+const SCIENCE_FIELDS = {
+  CHEMISTRY: 'chemistry',
+  PHYSICS: 'physics'
+};
+
+const DIAGRAM_TYPES = {
+  CHEMISTRY: {
+    '2D': '2d',
+    '3D': '3d'
+  },
+  PHYSICS: {
+    FORCE: 'force',
+    CIRCUIT: 'circuit'
+  }
 };
 
 
@@ -15,8 +32,9 @@ const STYLES = {
   CONCISE: 'concise'
 };
 
-const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onGenerateImage }) => {
+const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onScienceDiagram }) => {
   const [mode, setMode] = useState(MODES.TEXT);
+  const [scienceField, setScienceField] = useState(SCIENCE_FIELDS.CHEMISTRY);
 
   if (!position) return null;
 
@@ -40,6 +58,12 @@ const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onGene
           className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${mode === MODES.EQUATION ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
         >
           Equation
+        </button>
+        <button
+          onClick={() => setMode(MODES.SCIENCE)}
+          className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${mode === MODES.SCIENCE ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        >
+          Science
         </button>
 
       </div>
@@ -96,14 +120,67 @@ const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onGene
               <span className="font-medium text-gray-800">Graph</span>
               <span className="text-xs text-gray-500">Visualize as an interactive graph</span>
             </button>
+
+          </div>
+        </div>
+      )}
+
+      {mode === MODES.SCIENCE && (
+        /* Science Mode UI */
+        <div className="space-y-3">
+          <span className="block text-sm font-medium text-gray-700">Select Field:</span>
+          <div className="flex gap-2 mb-4">
             <button
-              onClick={onGenerateImage}
-              className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+              onClick={() => setScienceField(SCIENCE_FIELDS.CHEMISTRY)}
+              className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${scienceField === SCIENCE_FIELDS.CHEMISTRY ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
-              <span className="font-medium text-gray-800">Image</span>
-              <span className="text-xs text-gray-500">Generate an image from equation</span>
+              Chemistry
+            </button>
+            <button
+              onClick={() => setScienceField(SCIENCE_FIELDS.PHYSICS)}
+              className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${scienceField === SCIENCE_FIELDS.PHYSICS ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              Physics
             </button>
           </div>
+
+          {scienceField === SCIENCE_FIELDS.CHEMISTRY && (
+            <div className="space-y-2">
+              <button
+                onClick={() => onScienceDiagram('chemistry', '2d')}
+                className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+              >
+                <span className="font-medium text-gray-800">2D Structure</span>
+                <span className="text-xs text-gray-500">Generate a 2D molecular structure</span>
+              </button>
+              <button
+                onClick={() => onScienceDiagram('chemistry', '3d')}
+                className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+              >
+                <span className="font-medium text-gray-800">3D Structure</span>
+                <span className="text-xs text-gray-500">Generate a 3D molecular structure</span>
+              </button>
+            </div>
+          )}
+
+          {scienceField === SCIENCE_FIELDS.PHYSICS && (
+            <div className="space-y-2">
+              <button
+                onClick={() => onScienceDiagram('physics', 'force')}
+                className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+              >
+                <span className="font-medium text-gray-800">Force Diagram</span>
+                <span className="text-xs text-gray-500">Create a force diagram</span>
+              </button>
+              <button
+                onClick={() => onScienceDiagram('physics', 'circuit')}
+                className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+              >
+                <span className="font-medium text-gray-800">Circuit Diagram</span>
+                <span className="text-xs text-gray-500">Create a circuit diagram</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,39 +1,138 @@
-// PubChem API for chemical structures
-const PUBCHEM_API = {
-  SEARCH: 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name',
-  STRUCTURE: 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid'
+import SmilesDrawer from 'smiles-drawer';
+
+// PubChem API base URL
+const PUBCHEM_API = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
+
+// Cache for storing generated structures
+const structureCache = new Map();
+
+// Common compounds mapped to their PubChem CIDs and SMILES (for fallback)
+const VALID_COMPOUNDS = {
+  'H2O': { cid: '962', smiles: 'O', name: 'water' },
+  'CO2': { cid: '280', smiles: 'O=C=O', name: 'carbon dioxide' },
+  'NH3': { cid: '222', smiles: 'N', name: 'ammonia' },
+  'CH4': { cid: '297', smiles: 'C', name: 'methane' },
+  'NaOH': { cid: '14798', smiles: '[Na+].[OH-]', name: 'sodium hydroxide' },
+  'H2SO4': { cid: '1118', smiles: 'O=S(=O)(O)O', name: 'sulfuric acid' },
+  'HCl': { cid: '313', smiles: 'Cl', name: 'hydrochloric acid' },
+  'NaCl': { cid: '5234', smiles: '[Na+].[Cl-]', name: 'sodium chloride' },
+  'C6H12O6': { cid: '5793', smiles: 'C([C@@H]1[C@H]([C@@H]([C@H](C(O1)O)O)O)O)O', name: 'glucose' },
+  'O2': { cid: '977', smiles: 'O=O', name: 'oxygen' },
+  'N2': { cid: '947', smiles: 'N#N', name: 'nitrogen' }
 };
 
+// Initialize SmilesDrawer for fallback
+const drawer = new SmilesDrawer.Drawer({ width: 300, height: 300 });
+
+
 /**
- * Get compound ID from PubChem
+ * Helper function to validate and format chemical formulas
  */
-const getCompoundId = async (compound) => {
-  try {
-    const response = await fetch(`${PUBCHEM_API.SEARCH}/${encodeURIComponent(compound)}/cids/JSON`);
-    const data = await response.json();
-    return data.IdentifierList.CID[0];
-  } catch (error) {
-    console.error('Error getting compound ID:', error);
-    throw new Error('Could not find compound. Please check the chemical formula.');
-  }
+const validateAndFormatFormula = (compound) => {
+  const formatted = compound.trim()
+    .replace(/([a-z])0/gi, '$1O')  // Replace zero with capital O
+    .replace(/h2o/i, 'H2O')        // Common water format
+    .replace(/([a-z])([0-9])/gi, '$1$2')  // Preserve numbers
+    .replace(/^[a-z]/i, c => c.toUpperCase())  // Capitalize first letter
+    .replace(/[0-9][a-z]/gi, c => c.toUpperCase());  // Capitalize letters after numbers
+
+  return formatted;
 };
 
 /**
- * Generate chemical structure diagram
+ * Generate chemical structure diagram using PubChem with SmilesDrawer fallback
  */
 export const generateChemicalStructure = async (compound, type = '2D') => {
   try {
-    // First get the compound ID
-    const cid = await getCompoundId(compound);
+    console.log('Generating chemical structure for:', compound, 'type:', type);
     
-    // Generate URL for structure diagram
-    const structureUrl = `${PUBCHEM_API.STRUCTURE}/${cid}/PNG${type === '3D' ? '?record_type=3d' : ''}`;
-    
-    return {
-      type: 'image',
-      url: structureUrl,
-      alt: `${type} structure of ${compound}`
+    // Return loading state immediately
+    const loadingResult = {
+      type: 'loading',
+      content: `Generating ${type} structure for ${compound}...`
     };
+    
+    // Check cache first
+    const cacheKey = `${compound}_${type}`;
+    if (structureCache.has(cacheKey)) {
+      console.log('Using cached structure');
+      return structureCache.get(cacheKey);
+    }
+    
+    // Start the generation process
+    const formattedCompound = validateAndFormatFormula(compound);
+    const compoundData = VALID_COMPOUNDS[formattedCompound];
+    
+    if (!compoundData) {
+      throw new Error(`Compound not found in database: ${formattedCompound}. Currently only supporting common compounds.`);
+    }
+
+    try {
+      // Try PubChem first with a timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const imageUrl = `${PUBCHEM_API}/compound/cid/${compoundData.cid}/PNG?record_type=2d&image_size=300`;
+      const response = await fetch(imageUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        // Get the image blob directly
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        
+        // Create the result
+        const result = {
+          type: 'image',
+          url: url,
+          alt: `${type} structure of ${compound} (${compoundData.name})`,
+          source: 'pubchem'
+        };
+        
+        // Cache the result
+        structureCache.set(cacheKey, result);
+        return result;
+      }
+      throw new Error('PubChem request failed');
+    } catch (pubchemError) {
+      console.log('PubChem failed, falling back to SmilesDrawer:', pubchemError);
+      
+      // Fallback to SmilesDrawer
+      const canvas = document.createElement('canvas');
+      canvas.width = 300;
+      canvas.height = 300;
+      
+      // Draw the structure
+      await new Promise((resolve, reject) => {
+        try {
+          SmilesDrawer.parse(compoundData.smiles, function(tree) {
+            drawer.draw(tree, canvas, 'light', false);
+            resolve();
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+      
+      // Convert canvas to blob URL
+      const url = await new Promise(resolve => {
+        canvas.toBlob(blob => {
+          resolve(URL.createObjectURL(blob));
+        }, 'image/png');
+      });
+      
+      // Create the result
+      const result = {
+        type: 'image',
+        url: url,
+        alt: `${type} structure of ${compound} (${compoundData.name})`,
+        source: 'smilesdrawer'
+      };
+      
+      // Cache the result
+      structureCache.set(cacheKey, result);
+      return result;
+    }
   } catch (error) {
     console.error('Error generating chemical structure:', error);
     throw error;

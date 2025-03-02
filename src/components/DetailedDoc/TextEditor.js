@@ -1,5 +1,7 @@
 import { convertFromRaw, convertToRaw, EditorState, Modifier, ContentState, ContentBlock, genKey } from 'draft-js';
+import { generateChemicalStructure, generatePhysicsDiagram } from '../../services/scienceService';
 import GraphBlock from './GraphBlock';
+import LoadingBlock from './LoadingBlock';
 import { useEffect, useState } from 'react';
 import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
@@ -15,6 +17,38 @@ const TextEditor = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [graphBlocks, setGraphBlocks] = useState({});
+
+  const blockRendererFn = (block) => {
+    if (block.getType() === 'atomic') {
+      const contentState = editorState.getCurrentContent();
+      const entityKey = block.getEntityAt(0);
+      if (!entityKey) return null;
+      
+      const entity = contentState.getEntity(entityKey);
+      const entityData = entity.getData();
+      
+      if (entityData.type === 'loading') {
+        return {
+          component: LoadingBlock,
+          editable: false,
+          props: {
+            contentState,
+            block
+          }
+        };
+      } else if (entityData.type === 'image') {
+        return {
+          component: GraphBlock,
+          editable: false,
+          props: {
+            src: entityData.url,
+            alt: entityData.alt
+          }
+        };
+      }
+    }
+    return null;
+  };
 
   const { id } = useParams();
 
@@ -36,6 +70,94 @@ const TextEditor = () => {
       loadContent();
     }
   }, [id]);
+
+  const handleScienceDiagram = async (field, type) => {
+    try {
+      setError(null);
+      setLoading(true);
+      
+      const contentState = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
+      const selectedText = getSelectedText(contentState, selection);
+
+      if (!selectedText) {
+        throw new Error('Please select a chemical formula or diagram description');
+      }
+
+      // Create loading block immediately
+      const loadingStateWithEntity = contentState.createEntity(
+        'atomic',
+        'MUTABLE',
+        { 
+          type: 'loading',
+          content: `Generating ${field} diagram...`
+        }
+      );
+
+      const loadingEntityKey = loadingStateWithEntity.getLastCreatedEntityKey();
+      
+      // Insert loading block
+      let loadingContentState = Modifier.splitBlock(loadingStateWithEntity, selection);
+      loadingContentState = Modifier.setBlockType(
+        loadingContentState,
+        loadingContentState.getSelectionAfter(),
+        'atomic'
+      );
+
+      const loadingEditorState = EditorState.push(
+        editorState,
+        loadingContentState,
+        'insert-fragment'
+      );
+
+      handleEditorStateChange(loadingEditorState);
+
+      // Start generating the actual diagram
+      let result;
+      if (field === 'chemistry') {
+        result = await generateChemicalStructure(selectedText, type.toUpperCase());
+      } else if (field === 'physics') {
+        result = await generatePhysicsDiagram(selectedText, `${type.toUpperCase()}_DIAGRAM`);
+      }
+
+      // Create a new atomic block with the diagram
+      const contentStateWithEntity = loadingContentState.createEntity(
+        'atomic',
+        'IMMUTABLE',
+        { type: 'image', ...result }
+      );
+
+      const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
+      
+      // Replace the loading block with the actual diagram
+      let newContentState = Modifier.setBlockType(
+        contentStateWithEntity,
+        loadingContentState.getSelectionAfter(),
+        'atomic'
+      );
+
+      // Insert space after atomic block
+      newContentState = Modifier.insertText(
+        newContentState,
+        newContentState.getSelectionAfter(),
+        ' '
+      );
+
+      const newEditorState = EditorState.push(
+        loadingEditorState,
+        newContentState,
+        'change-block-type'
+      );
+
+      handleEditorStateChange(newEditorState);
+      setToolbarPosition(null);
+    } catch (error) {
+      console.error('Science diagram error:', error);
+      setError(error.message || 'Failed to generate diagram');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleEditorStateChange = async (newEditorState) => {
     setEditorState(newEditorState);
@@ -276,7 +398,6 @@ const TextEditor = () => {
         blockRendererFn={block => {
           if (block.getType() === 'graph') {
             const graphData = graphBlocks[block.getKey()];
-            console.log('Rendering graph block:', block.getKey(), graphData);
             if (!graphData) return null;
             
             return {
@@ -285,37 +406,45 @@ const TextEditor = () => {
               props: {
                 blockKey: block.getKey(),
                 ...graphData,
-                onRemove: () => {
-                  // Remove the block from graphBlocks state first
-                  setGraphBlocks(prev => {
-                    const newBlocks = { ...prev };
-                    delete newBlocks[block.getKey()];
-                    return newBlocks;
-                  });
-
-                  // Then remove the block from editor state
-                  const contentState = editorState.getCurrentContent();
-                  const selection = editorState.getSelection();
-                  const blockMap = contentState.getBlockMap().delete(block.getKey());
-                  const newContent = contentState.merge({
-                    blockMap,
-                    selectionAfter: selection
-                  });
-
-                  const newEditorState = EditorState.push(
-                    editorState,
-                    newContent,
-                    'remove-range'
-                  );
-
-                  handleEditorStateChange(newEditorState);
-                }
+                onRemove: () => handleRemoveGraph(block.getKey())
               }
             };
+          } else if (block.getType() === 'atomic') {
+            const contentState = editorState.getCurrentContent();
+            const entityKey = block.getEntityAt(0);
+            if (!entityKey) return null;
+            
+            const entity = contentState.getEntity(entityKey);
+            const data = entity.getData();
+            
+            if (data.type === 'loading') {
+              return {
+                component: LoadingBlock,
+                editable: false,
+                props: {
+                  contentState,
+                  block
+                }
+              };
+            } else if (data.type === 'image') {
+              return {
+                component: props => (
+                  <div className="text-center my-4">
+                    <img 
+                      src={data.url} 
+                      alt={data.alt || 'Chemical structure'} 
+                      className="mx-auto max-w-2xl"
+                      style={{ maxHeight: '400px' }}
+                    />
+                  </div>
+                ),
+                editable: false
+              };
+            }
           }
           return null;
         }}
-     />
+      />
       {toolbarPosition && (
         <SelectionToolbar
           position={toolbarPosition}
@@ -323,6 +452,7 @@ const TextEditor = () => {
           onGraph={handleGraphClick}
           loading={loading}
           error={error}
+          onScienceDiagram={handleScienceDiagram}
         />
       )}
 
