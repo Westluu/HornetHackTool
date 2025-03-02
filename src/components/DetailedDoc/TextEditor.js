@@ -1,6 +1,8 @@
 import { convertFromRaw, convertToRaw, EditorState, Modifier, ContentState, ContentBlock, genKey } from 'draft-js';
 import { generateChemicalStructure, generatePhysicsDiagram } from '../../services/scienceService';
 import GraphBlock from './GraphBlock';
+import CanvasBlock from './CanvasBlock';
+import TestBlock from './TestBlock';
 import LoadingBlock from './LoadingBlock';
 import { useEffect, useState } from 'react';
 import { Editor } from 'react-draft-wysiwyg';
@@ -18,14 +20,25 @@ const TextEditor = () => {
   const [error, setError] = useState(null);
   const [graphBlocks, setGraphBlocks] = useState({});
 
-  const blockRendererFn = (block) => {
+  const customBlockRenderer = (block) => {
+    console.log('TextEditor: customBlockRenderer called for block:', block.getKey(), 'type:', block.getType());
+    
     if (block.getType() === 'atomic') {
+      console.log('TextEditor: Rendering atomic block:', block.getKey());
       const contentState = editorState.getCurrentContent();
       const entityKey = block.getEntityAt(0);
-      if (!entityKey) return null;
+      
+      console.log('TextEditor: Entity key for block:', entityKey);
+      
+      if (!entityKey) {
+        console.warn('TextEditor: No entity key found for atomic block');
+        return null;
+      }
       
       const entity = contentState.getEntity(entityKey);
       const entityData = entity.getData();
+      console.log('TextEditor: Entity data:', entityData);
+      console.log('TextEditor: Entity type:', entity.getType());
       
       if (entityData.type === 'loading') {
         return {
@@ -36,7 +49,7 @@ const TextEditor = () => {
             block
           }
         };
-      } else if (entityData.type === 'image') {
+      } else if (entity.getType() === 'IMAGE_BLOCK' || entityData.type === 'image') {
         return {
           component: GraphBlock,
           editable: false,
@@ -45,7 +58,51 @@ const TextEditor = () => {
             alt: entityData.alt
           }
         };
+      } else if (entity.getType() === 'TEST_BLOCK') {
+        console.log('TextEditor: Rendering TEST_BLOCK entity with data:', entityData);
+        return {
+          component: TestBlock,
+          editable: false,
+          props: {
+            text: entityData.text
+          }
+        };
+      } else if (entityData.type === 'test') {
+        console.log('TextEditor: Rendering test block with text:', entityData.text);
+        return {
+          component: TestBlock,
+          editable: false,
+          props: {
+            text: entityData.text
+          }
+        };
+      } else if (entity.getType() === 'CANVAS_BLOCK' || entityData.type === 'canvas') {
+        console.log('TextEditor: Rendering canvas block with rawScript:', entityData.rawScript);
+        return {
+          component: CanvasBlock,  // Use CanvasBlock for rendering actual canvas diagrams
+          editable: false,
+          props: {
+            executeScript: entityData.executeScript,
+            rawScript: entityData.rawScript,
+            fallback: entityData.fallback,
+            diagramType: entityData.diagramType || 'unknown',
+            onRemove: () => handleRemoveCanvasBlock(block.getKey())
+          }
+        };
       }
+    } else if (block.getType() === 'graph') {
+      const graphData = graphBlocks[block.getKey()];
+      if (!graphData) return null;
+      
+      return {
+        component: GraphBlock,
+        editable: false,
+        props: {
+          blockKey: block.getKey(),
+          ...graphData,
+          onRemove: () => handleRemoveGraph(block.getKey())
+        }
+      };
     }
     return null;
   };
@@ -73,80 +130,145 @@ const TextEditor = () => {
 
   const handleScienceDiagram = async (field, type) => {
     try {
+      console.log('handleScienceDiagram called with:', field, type);
       setError(null);
       setLoading(true);
       
       const contentState = editorState.getCurrentContent();
       const selection = editorState.getSelection();
-      const selectedText = getSelectedText(contentState, selection);
+      let selectedText = getSelectedText(contentState, selection);
+      console.log('Selected text:', selectedText);
 
+      // If no text is selected, prompt the user for input
       if (!selectedText) {
-        throw new Error('Please select a chemical formula or diagram description');
-      }
-
-      // Create loading block immediately
-      const loadingStateWithEntity = contentState.createEntity(
-        'atomic',
-        'MUTABLE',
-        { 
-          type: 'loading',
-          content: `Generating ${field} diagram...`
+        // For physics diagrams, we can prompt for a description
+        if (field.toLowerCase() === 'physics') {
+          const promptText = prompt('Enter a description of the physics problem:', 
+            'A 10kg block being pulled with a 20N force at a 30-degree angle on a frictionless surface');
+          
+          if (promptText) {
+            selectedText = promptText;
+            console.log('User provided text:', selectedText);
+          } else {
+            throw new Error('Please provide a description of the physics problem');
+          }
+        } else {
+          throw new Error('Please select a chemical formula or diagram description');
         }
-      );
-
-      const loadingEntityKey = loadingStateWithEntity.getLastCreatedEntityKey();
-      
-      // Insert loading block
-      let loadingContentState = Modifier.splitBlock(loadingStateWithEntity, selection);
-      loadingContentState = Modifier.setBlockType(
-        loadingContentState,
-        loadingContentState.getSelectionAfter(),
-        'atomic'
-      );
-
-      const loadingEditorState = EditorState.push(
-        editorState,
-        loadingContentState,
-        'insert-fragment'
-      );
-
-      handleEditorStateChange(loadingEditorState);
+      }
 
       // Start generating the actual diagram
       let result;
-      if (field === 'chemistry') {
+      console.log('Generating diagram for field:', field, 'type:', type);
+      
+      if (field.toLowerCase() === 'chemistry') {
+        console.log('Generating chemical structure');
         result = await generateChemicalStructure(selectedText, type.toUpperCase());
-      } else if (field === 'physics') {
+      } else if (field.toLowerCase() === 'physics') {
+        console.log('Generating physics diagram');
         result = await generatePhysicsDiagram(selectedText, `${type.toUpperCase()}_DIAGRAM`);
+        
+        // Handle canvas-based diagrams differently
+        if (result.type === 'canvas') {
+          console.log('TextEditor: Handling canvas diagram with result:', result);
+          
+          const contentStateWithEntity = contentState.createEntity(
+            'CANVAS_BLOCK',
+            'IMMUTABLE',
+            { type: 'canvas', ...result }
+          );
+          
+          const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
+          console.log('TextEditor: Created entity with key:', entityKey);
+          
+          // First, preserve the selected text by not replacing it
+          // Move the selection to the end of the selected text
+          const selectionAtEnd = selection.merge({
+            anchorOffset: selection.getEndOffset(),
+            focusOffset: selection.getEndOffset(),
+            isBackward: false
+          });
+          
+          // Insert a new line after the selected text
+          const contentStateWithNewLine = Modifier.splitBlock(
+            contentStateWithEntity,
+            selectionAtEnd
+          );
+          
+          // Insert atomic block with the entity
+          const contentStateWithBlock = Modifier.setBlockType(
+            contentStateWithNewLine,
+            contentStateWithNewLine.getSelectionAfter(),
+            'atomic'
+          );
+          
+          // Set the entity for the atomic block
+          const contentStateWithEntity2 = Modifier.replaceText(
+            contentStateWithBlock,
+            contentStateWithBlock.getSelectionAfter(),
+            ' ',
+            null,
+            entityKey
+          );
+          
+          const newEditorState = EditorState.push(
+            editorState,
+            contentStateWithEntity2,
+            'insert-fragment'
+          );
+
+          handleEditorStateChange(newEditorState);
+          setToolbarPosition(null);
+          setLoading(false);
+          return; // Exit early since we've handled the canvas diagram
+        }
+      } else {
+        throw new Error(`Unsupported science field: ${field}`);
       }
 
-      // Create a new atomic block with the diagram
-      const contentStateWithEntity = loadingContentState.createEntity(
-        'atomic',
+      // Create loading block
+      const contentStateWithEntity = contentState.createEntity(
+        'IMAGE_BLOCK',
         'IMMUTABLE',
         { type: 'image', ...result }
       );
-
+      
       const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
       
-      // Replace the loading block with the actual diagram
-      let newContentState = Modifier.setBlockType(
+      // First, preserve the selected text by not replacing it
+      // Move the selection to the end of the selected text
+      const selectionAtEnd = selection.merge({
+        anchorOffset: selection.getEndOffset(),
+        focusOffset: selection.getEndOffset(),
+        isBackward: false
+      });
+      
+      // Insert a new line after the selected text
+      const contentStateWithNewLine = Modifier.splitBlock(
         contentStateWithEntity,
-        loadingContentState.getSelectionAfter(),
+        selectionAtEnd
+      );
+      
+      // Insert atomic block with the entity
+      const contentStateWithBlock = Modifier.setBlockType(
+        contentStateWithNewLine,
+        contentStateWithNewLine.getSelectionAfter(),
         'atomic'
       );
-
-      // Insert space after atomic block
-      newContentState = Modifier.insertText(
-        newContentState,
-        newContentState.getSelectionAfter(),
-        ' '
+      
+      // Set the entity for the atomic block
+      const contentStateWithEntity2 = Modifier.replaceText(
+        contentStateWithBlock,
+        contentStateWithBlock.getSelectionAfter(),
+        ' ',
+        null,
+        entityKey
       );
-
+      
       const newEditorState = EditorState.push(
-        loadingEditorState,
-        newContentState,
-        'change-block-type'
+        editorState,
+        contentStateWithEntity2,
+        'insert-fragment'
       );
 
       handleEditorStateChange(newEditorState);
@@ -162,9 +284,18 @@ const TextEditor = () => {
   const handleEditorStateChange = async (newEditorState) => {
     setEditorState(newEditorState);
     
+    // Debug: Log all blocks in the editor state
+    const contentState = newEditorState.getCurrentContent();
+    const blocks = contentState.getBlocksAsArray();
+    console.log('TextEditor: Current blocks in editor state:', blocks.map(block => ({
+      key: block.getKey(),
+      type: block.getType(),
+      text: block.getText().substring(0, 20) + (block.getText().length > 20 ? '...' : ''),
+      hasEntity: block.getEntityAt(0) !== null
+    })));
+    
     // Check for text selection
     const selection = newEditorState.getSelection();
-    const contentState = newEditorState.getCurrentContent();
     const selectedText = getSelectedText(contentState, selection);
 
     if (selectedText && !selection.isCollapsed()) {
@@ -204,7 +335,11 @@ const TextEditor = () => {
   
 
   const getSelectedText = (contentState, selection) => {
-    if (selection.isCollapsed()) return '';
+    console.log('getSelectedText called with selection:', selection.toJS());
+    if (selection.isCollapsed()) {
+      console.log('Selection is collapsed, returning empty string');
+      return '';
+    }
 
     const startKey = selection.getStartKey();
     const endKey = selection.getEndKey();
@@ -213,17 +348,26 @@ const TextEditor = () => {
     const startBlockText = startBlock.getText();
     const startSelectedText = startBlockText.slice(selection.getStartOffset());
 
+    console.log('Start key:', startKey);
+    console.log('End key:', endKey);
+    console.log('Start block text:', startBlockText);
+    console.log('Start offset:', selection.getStartOffset());
+    console.log('End offset:', selection.getEndOffset());
+
     if (isStartAndEndBlocksEqual) {
-      return startBlockText.slice(
+      const result = startBlockText.slice(
         selection.getStartOffset(),
         selection.getEndOffset()
       );
+      console.log('Single block selection, returning:', result);
+      return result;
     }
 
     const endBlock = contentState.getBlockForKey(endKey);
     const endSelectedText = endBlock.getText().slice(0, selection.getEndOffset());
 
     if (startKey === endKey) {
+      console.log('Start and end keys are equal, returning:', startSelectedText);
       return startSelectedText;
     }
 
@@ -237,6 +381,7 @@ const TextEditor = () => {
     }
 
     selectedText += endSelectedText;
+    console.log('Multi-block selection, returning:', selectedText);
     return selectedText;
   };
 
@@ -297,8 +442,197 @@ const TextEditor = () => {
     onClick={() => alert('AI Button!')}
   >
       AI
-
     </button>
+  );
+  
+  // Physics Diagram Button Component
+  // Test function to create a simple atomic block
+  const createTestBlock = () => {
+    console.log('Creating test atomic block');
+    try {
+      const contentState = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
+      
+      // Create entity with simple data
+      const contentStateWithEntity = contentState.createEntity(
+        'TEST_BLOCK',  // Entity type
+        'IMMUTABLE',
+        { type: 'test', text: 'This is a test atomic block' }
+      );
+      
+      const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
+      console.log('Test entity created with key:', entityKey);
+      
+      // First, preserve the selected text by not replacing it
+      // Move the selection to the end of the selected text
+      const selectionAtEnd = selection.merge({
+        anchorOffset: selection.getEndOffset(),
+        focusOffset: selection.getEndOffset(),
+        isBackward: false
+      });
+      
+      // Insert a new line after the selected text
+      const contentStateWithNewLine = Modifier.splitBlock(
+        contentStateWithEntity,
+        selectionAtEnd
+      );
+      
+      // Insert atomic block with the entity
+      const contentStateWithBlock = Modifier.setBlockType(
+        contentStateWithNewLine,
+        contentStateWithNewLine.getSelectionAfter(),
+        'atomic'
+      );
+      
+      // Set the entity for the atomic block
+      const contentStateWithEntity2 = Modifier.replaceText(
+        contentStateWithBlock,
+        contentStateWithBlock.getSelectionAfter(),
+        ' ',
+        null,
+        entityKey
+      );
+      
+      const newEditorState = EditorState.push(
+        editorState,
+        contentStateWithEntity2,
+        'insert-fragment'
+      );
+      
+      handleEditorStateChange(newEditorState);
+      console.log('Test atomic block created successfully');
+      alert('Test atomic block created. Check console for logs.');
+    } catch (error) {
+      console.error('Error creating test block:', error);
+      alert('Error creating test block: ' + error.message);
+    }
+  };
+  
+  // Test function to create a canvas block directly
+  const createTestCanvasBlock = () => {
+    console.log('Creating test canvas block');
+    try {
+      const contentState = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
+      
+      // Create a test script
+      const testScript = `function drawTestDiagram(canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'lightblue';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'black';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Test Diagram', canvas.width/2, canvas.height/2);
+      }`;
+      
+      // Create entity
+      const contentStateWithEntity = contentState.createEntity(
+        'CANVAS_BLOCK',
+        'IMMUTABLE',
+        { type: 'canvas', rawScript: testScript, diagramType: 'test' }
+      );
+      
+      const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
+      console.log('Test canvas entity created with key:', entityKey);
+      
+      // First, preserve the selected text by not replacing it
+      // Move the selection to the end of the selected text
+      const selectionAtEnd = selection.merge({
+        anchorOffset: selection.getEndOffset(),
+        focusOffset: selection.getEndOffset(),
+        isBackward: false
+      });
+      
+      // Insert a new line after the selected text
+      const contentStateWithNewLine = Modifier.splitBlock(
+        contentStateWithEntity,
+        selectionAtEnd
+      );
+      
+      // Insert atomic block with the entity
+      const contentStateWithBlock = Modifier.setBlockType(
+        contentStateWithNewLine,
+        contentStateWithNewLine.getSelectionAfter(),
+        'atomic'
+      );
+      
+      // Set the entity for the atomic block
+      const contentStateWithEntity2 = Modifier.replaceText(
+        contentStateWithBlock,
+        contentStateWithBlock.getSelectionAfter(),
+        ' ',
+        null,
+        entityKey
+      );
+      
+      const newEditorState = EditorState.push(
+        editorState,
+        contentStateWithEntity2,
+        'insert-fragment'
+      );
+      
+      handleEditorStateChange(newEditorState);
+      console.log('Test canvas block created successfully');
+    } catch (error) {
+      console.error('Error creating test canvas block:', error);
+      alert('Error creating test canvas block: ' + error.message);
+    }
+  };
+  
+  const PhysicsDiagramButton = () => (
+    <div>
+      <button
+        style={{
+          padding: '5px 10px',
+          margin: '5px',
+          backgroundColor: '#4CAF50',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+        onClick={() => {
+          console.log('PhysicsDiagramButton clicked');
+          try {
+            handleScienceDiagram('physics', 'force');
+          } catch (error) {
+            console.error('Error in PhysicsDiagramButton click handler:', error);
+            alert('Error creating physics diagram: ' + error.message);
+          }
+        }}
+      >
+        Physics Diagram
+      </button>
+      <button
+        style={{
+          padding: '5px 10px',
+          margin: '5px',
+          backgroundColor: '#3498db',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+        onClick={createTestCanvasBlock}
+      >
+        Test Canvas
+      </button>
+      <button
+        style={{
+          padding: '5px 10px',
+          margin: '5px',
+          backgroundColor: '#9b59b6',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+        onClick={createTestBlock}
+      >
+        Test Block
+      </button>
+    </div>
   );
 
   const handleRemoveGraph = (blockKey) => {
@@ -306,6 +640,34 @@ const TextEditor = () => {
     const newGraphBlocks = { ...graphBlocks };
     delete newGraphBlocks[blockKey];
     setGraphBlocks(newGraphBlocks);
+  };
+
+  const handleRemoveCanvasBlock = (blockKey) => {
+    // Remove the canvas block from the editor state
+    const contentState = editorState.getCurrentContent();
+    const blocks = contentState.getBlocksAsArray();
+    
+    // Find the block with the given key
+    const blockIndex = blocks.findIndex(block => block.getKey() === blockKey);
+    
+    if (blockIndex !== -1) {
+      // Create a new array without the block to be removed
+      const newBlocks = [...blocks];
+      newBlocks.splice(blockIndex, 1);
+      
+      // Create a new content state with the updated blocks
+      const newContentState = ContentState.createFromBlockArray(newBlocks);
+      
+      // Push the new content state to the editor
+      const newEditorState = EditorState.push(
+        editorState,
+        newContentState,
+        'remove-range'
+      );
+      
+      // Update the editor state
+      handleEditorStateChange(newEditorState);
+    }
   };
 
   const handleGraphClick = () => {
@@ -388,82 +750,44 @@ const TextEditor = () => {
   return (
     <div className='bg-[#F8F9FA] min-h-screen pb-16 relative'>
 
-      <Editor
-        editorState={editorState}
-        onEditorStateChange={handleEditorStateChange}
-        toolbarClassName='sticky top-0 z-50 !justify-center'
-        editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen relative'
-        toolbarCustomButtons={[<AIButton key="ai-button" />, 
-        <button key="diagram-button" onClick={handleGraphClick}>Graph</button>]}
-        blockRendererFn={block => {
-          if (block.getType() === 'graph') {
-            const graphData = graphBlocks[block.getKey()];
-            if (!graphData) return null;
-            
-            return {
-              component: GraphBlock,
-              editable: false,
-              props: {
-                blockKey: block.getKey(),
-                ...graphData,
-                onRemove: () => handleRemoveGraph(block.getKey())
-              }
-            };
-          } else if (block.getType() === 'atomic') {
-            const contentState = editorState.getCurrentContent();
-            const entityKey = block.getEntityAt(0);
-            if (!entityKey) return null;
-            
-            const entity = contentState.getEntity(entityKey);
-            const data = entity.getData();
-            
-            if (data.type === 'loading') {
-              return {
-                component: LoadingBlock,
-                editable: false,
-                props: {
-                  contentState,
-                  block
-                }
-              };
-            } else if (data.type === 'image') {
-              return {
-                component: props => (
-                  <div className="text-center my-4">
-                    <img 
-                      src={data.url} 
-                      alt={data.alt || 'Chemical structure'} 
-                      className="mx-auto max-w-2xl"
-                      style={{ maxHeight: '400px' }}
-                    />
-                  </div>
-                ),
-                editable: false
-              };
-            }
-          }
-          return null;
-        }}
-      />
-      {toolbarPosition && (
-        <SelectionToolbar
-          position={toolbarPosition}
-          onRewrite={handleRewrite}
-          onGraph={handleGraphClick}
-          loading={loading}
-          error={error}
-          onScienceDiagram={handleScienceDiagram}
+      <div className='relative'>
+        <Editor
+          editorState={editorState}
+          onEditorStateChange={handleEditorStateChange}
+          toolbarClassName='sticky top-0 z-50 !justify-center'
+          editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen'
+          toolbarCustomButtons={[
+            <AIButton key="ai-button" />, 
+            <button key="diagram-button" onClick={handleGraphClick}>Graph</button>,
+            <PhysicsDiagramButton key="physics-diagram-button" />
+          ]}
+          blockRendererFn={customBlockRenderer}
+          onBlur={() => console.log('Editor blur event')}
+          onFocus={() => console.log('Editor focus event')}
         />
-      )}
 
-      {/* Graph handling */}
-      {Object.entries(graphBlocks).map(([blockKey, graphData]) => (
-        <GraphBlock
-          key={blockKey}
-          data={graphData}
-          onClose={() => handleRemoveGraph(blockKey)}
-        />
-      ))}
+        {/* Selection toolbar */}
+        {toolbarPosition && (
+          <SelectionToolbar
+            position={toolbarPosition}
+            onRewrite={handleRewrite}
+            onGraph={handleGraphClick}
+            onScienceDiagram={handleScienceDiagram}
+            loading={loading}
+            error={error}
+          />
+        )}
+
+        {/* Graph handling */}
+        {Object.entries(graphBlocks).map(([blockKey, graphData]) => (
+          <GraphBlock
+            key={blockKey}
+            blockKey={blockKey}
+            {...graphData}
+            onRemove={() => handleRemoveGraph(blockKey)}
+          />
+        ))}
+      </div>
     </div>
   );
 };

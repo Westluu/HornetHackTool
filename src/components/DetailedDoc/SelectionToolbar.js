@@ -11,19 +11,6 @@ const SCIENCE_FIELDS = {
   PHYSICS: 'physics'
 };
 
-const DIAGRAM_TYPES = {
-  CHEMISTRY: {
-    '2D': '2d',
-    '3D': '3d'
-  },
-  PHYSICS: {
-    FORCE: 'force',
-    CIRCUIT: 'circuit'
-  }
-};
-
-
-
 
 const STYLES = {
   FORMAL: 'formal',
@@ -35,6 +22,9 @@ const STYLES = {
 const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onScienceDiagram }) => {
   const [mode, setMode] = useState(MODES.TEXT);
   const [scienceField, setScienceField] = useState(SCIENCE_FIELDS.CHEMISTRY);
+  
+  // Debug the current state
+  console.log('Current mode:', mode, 'Current science field:', scienceField);
 
   if (!position) return null;
 
@@ -131,13 +121,19 @@ const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onScie
           <span className="block text-sm font-medium text-gray-700">Select Field:</span>
           <div className="flex gap-2 mb-4">
             <button
-              onClick={() => setScienceField(SCIENCE_FIELDS.CHEMISTRY)}
+              onClick={() => {
+                console.log('Chemistry field selected');
+                setScienceField(SCIENCE_FIELDS.CHEMISTRY);
+              }}
               className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${scienceField === SCIENCE_FIELDS.CHEMISTRY ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
               Chemistry
             </button>
             <button
-              onClick={() => setScienceField(SCIENCE_FIELDS.PHYSICS)}
+              onClick={() => {
+                console.log('Physics field selected');
+                setScienceField(SCIENCE_FIELDS.PHYSICS);
+              }}
               className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${scienceField === SCIENCE_FIELDS.PHYSICS ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
               Physics
@@ -147,14 +143,20 @@ const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onScie
           {scienceField === SCIENCE_FIELDS.CHEMISTRY && (
             <div className="space-y-2">
               <button
-                onClick={() => onScienceDiagram('chemistry', '2d')}
+                onClick={() => {
+                  console.log('2D Structure button clicked');
+                  onScienceDiagram('chemistry', '2d');
+                }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
               >
                 <span className="font-medium text-gray-800">2D Structure</span>
                 <span className="text-xs text-gray-500">Generate a 2D molecular structure</span>
               </button>
               <button
-                onClick={() => onScienceDiagram('chemistry', '3d')}
+                onClick={() => {
+                  console.log('3D Structure button clicked');
+                  onScienceDiagram('chemistry', '3d');
+                }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
               >
                 <span className="font-medium text-gray-800">3D Structure</span>
@@ -166,14 +168,20 @@ const SelectionToolbar = ({ onRewrite, position, loading, error, onGraph, onScie
           {scienceField === SCIENCE_FIELDS.PHYSICS && (
             <div className="space-y-2">
               <button
-                onClick={() => onScienceDiagram('physics', 'force')}
+                onClick={() => {
+                  console.log('Force diagram button clicked');
+                  onScienceDiagram('physics', 'force');
+                }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
               >
                 <span className="font-medium text-gray-800">Force Diagram</span>
                 <span className="text-xs text-gray-500">Create a force diagram</span>
               </button>
               <button
-                onClick={() => onScienceDiagram('physics', 'circuit')}
+                onClick={() => {
+                  console.log('Circuit diagram button clicked');
+                  onScienceDiagram('physics', 'circuit');
+                }}
                 className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
               >
                 <span className="font-medium text-gray-800">Circuit Diagram</span>
