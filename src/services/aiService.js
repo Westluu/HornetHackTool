@@ -103,3 +103,31 @@ export const suggestEdits = async (text) => {
   const response = await generateAIResponse(prompt);
   return response.replace(/^"|"$/g, '').trim();
 };
+
+export const analyzePhysicsProblem = async (text) => {
+  try {
+    console.log('Analyzing physics problem:', text);
+    const response = await fetch('http://localhost:3001/api/analyze-physics', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data.analysis) {
+      throw new Error('Invalid response from physics analysis service');
+    }
+
+    console.log('Physics analysis result:', data.analysis);
+    return JSON.parse(data.analysis);
+  } catch (error) {
+    console.error('Error analyzing physics problem:', error);
+    throw new Error('Failed to analyze physics problem');
+  }
+};
