@@ -1166,6 +1166,67 @@ const TextEditor = () => {
     }
   };
 
+  // Function to insert AI answer into the document
+  const handleInsertAnswer = (answer) => {
+    try {
+      // Get the current selection or create one at cursor position
+      const selection = editorState.getSelection();
+      const contentState = editorState.getCurrentContent();
+      
+      // If we have highlighted text, we'll place the answer after it
+      // Otherwise, we'll insert at the current cursor position
+      const selectionAtEnd = selection.merge({
+        anchorOffset: selection.getEndOffset(),
+        focusOffset: selection.getEndOffset(),
+        isBackward: false
+      });
+      
+      // Insert a new line after the selected text or cursor position
+      const contentStateWithNewLine = Modifier.splitBlock(
+        contentState,
+        selectionAtEnd
+      );
+      
+      // Insert the AI answer as regular text
+      const contentStateWithAnswer = Modifier.insertText(
+        contentStateWithNewLine,
+        contentStateWithNewLine.getSelectionAfter(),
+        answer
+      );
+      
+      // Create a new editor state with the answer inserted
+      let newEditorState = EditorState.push(
+        editorState,
+        contentStateWithAnswer,
+        'insert-text'
+      );
+      
+      // Move the selection to the end of the inserted content
+      const finalSelection = newEditorState.getSelection().merge({
+        anchorKey: contentStateWithAnswer.getSelectionAfter().getAnchorKey(),
+        anchorOffset: contentStateWithAnswer.getSelectionAfter().getAnchorOffset(),
+        focusKey: contentStateWithAnswer.getSelectionAfter().getFocusKey(),
+        focusOffset: contentStateWithAnswer.getSelectionAfter().getFocusOffset(),
+        isBackward: false
+      });
+      
+      // Apply the final selection
+      newEditorState = EditorState.forceSelection(newEditorState, finalSelection);
+      
+      // Update the editor state
+      setEditorState(newEditorState);
+      
+      // Save the document with the inserted answer
+      saveDocument(newEditorState);
+      
+      // Close the sidebar after inserting
+      setShowAskAISidebar(false);
+    } catch (error) {
+      console.error('Error inserting AI answer:', error);
+      setError('Failed to insert AI answer into document');
+    }
+  };
+
   // Function to close the AI answer modal
   const handleCloseAIAnswer = () => {
     setAIAnswer(null);
@@ -1660,6 +1721,7 @@ const TextEditor = () => {
           highlightedText={selectedTextForAI}
           documentContext={editorState.getCurrentContent().getPlainText()}
           onSubmitQuestion={handleAskQuestion}
+          onInsertAnswer={handleInsertAnswer}
         />
 
         {/* Graph handling */}

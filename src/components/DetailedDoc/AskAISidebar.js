@@ -5,7 +5,8 @@ const AskAISidebar = ({
   onClose, 
   highlightedText, 
   documentContext, 
-  onSubmitQuestion 
+  onSubmitQuestion,
+  onInsertAnswer 
 }) => {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
@@ -120,6 +121,16 @@ const AskAISidebar = ({
                   paragraph ? <p key={i} className="mb-2">{paragraph}</p> : <br key={i} />
                 ))}
               </div>
+              {message.role === 'ai' && !message.isError && (
+                <div className="mt-2 flex justify-end">
+                  <button
+                    onClick={() => onInsertAnswer(message.content)}
+                    className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                  >
+                    Insert into Document
+                  </button>
+                </div>
+              )}
             </div>
           ))
         )}
