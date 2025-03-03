@@ -4,13 +4,16 @@ import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
 import { useParams } from 'react-router-dom';
 import { getDocument, saveDocument } from '../../services/localStorageService';
-import { rewriteText } from '../../services/aiService';
+import { rewriteText, askQuestionAboutContent } from '../../services/aiService';
 import { generateChemicalStructure, generatePhysicsDiagram, generate3DChemicalStructure } from '../../services/scienceService';
 import GraphBlock from './GraphBlock';
 import CanvasBlock from './CanvasBlock';
 import TestBlock from './TestBlock';
 import LoadingBlock from './LoadingBlock';
 import SelectionToolbar from './SelectionToolbar';
+import AIAnswerModal from './AIAnswerModal';
+import AskAISidebar from './AskAISidebar';
+import AskAIButton from './AskAIButton';
 
 // Simple component for displaying chemical structure images
 const ImageBlock = (props) => {
@@ -51,6 +54,10 @@ const TextEditor = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [graphBlocks, setGraphBlocks] = useState({});
+  const [aiAnswer, setAIAnswer] = useState(null);
+  const [askingQuestion, setAskingQuestion] = useState(false);
+  const [showAskAISidebar, setShowAskAISidebar] = useState(false);
+  const [selectedTextForAI, setSelectedTextForAI] = useState('');
 
   const customBlockRenderer = (block) => {
     console.log('TextEditor: customBlockRenderer called for block:', block.getKey(), 'type:', block.getType());
@@ -969,8 +976,14 @@ const TextEditor = () => {
     // Save the document content
     await saveDocumentContent(newEditorState);
     
+    // Check if the active element is the toolbar input field
+    const isToolbarInputActive = document.activeElement && 
+      (document.activeElement.getAttribute('data-toolbar-input') === 'true' ||
+       document.activeElement.closest('[data-toolbar-input="true"]'));
+    
     // Only update toolbar position if we're not in the middle of generating a diagram
-    if (!isGeneratingDiagram) {
+    // and not typing in the toolbar input field
+    if (!isGeneratingDiagram && !isToolbarInputActive) {
       // Check for text selection
       const selection = newEditorState.getSelection();
       
@@ -994,6 +1007,9 @@ const TextEditor = () => {
               });
             }
           }
+        } else if (!isToolbarInputActive) {
+          // Only hide the toolbar if we're not typing in a toolbar input
+          setToolbarPosition(null);
         }
       } catch (error) {
         console.error('Error handling selection:', error);
@@ -1111,6 +1127,50 @@ const TextEditor = () => {
         setToolbarPosition(null);
       }
     }
+  };
+
+  // Function to open the Ask AI sidebar
+  const handleOpenAskAISidebar = () => {
+    const contentState = editorState.getCurrentContent();
+    const selection = editorState.getSelection();
+    const highlightedText = getSelectedText(contentState, selection);
+    
+    if (highlightedText) {
+      setSelectedTextForAI(highlightedText);
+      setShowAskAISidebar(true);
+      // Hide the selection toolbar
+      setToolbarPosition(null);
+    } else {
+      setError('No text selected');
+    }
+  };
+  
+  // Function to handle asking questions about the selected text
+  const handleAskQuestion = async (question) => {
+    try {
+      setError(null);
+      setAskingQuestion(true);
+      
+      // Get the full document text as additional context
+      const contentState = editorState.getCurrentContent();
+      const fullText = contentState.getBlockMap()
+        .map(block => block.getText())
+        .join('\n');
+      
+      // Call the AI service
+      const answer = await askQuestionAboutContent(selectedTextForAI, fullText, question);
+      return answer; // Return the answer for the sidebar to display
+    } catch (error) {
+      console.error('Error asking question:', error);
+      throw error; // Throw the error for the sidebar to handle
+    } finally {
+      setAskingQuestion(false);
+    }
+  };
+
+  // Function to close the AI answer modal
+  const handleCloseAIAnswer = () => {
+    setAIAnswer(null);
   };
 
   //AI Button Component
@@ -1576,11 +1636,32 @@ const TextEditor = () => {
             onRewrite={handleRewrite}
             onGraph={handleGraphClick}
             onScienceDiagram={handleScienceDiagram}
-            loading={loading}
+            loading={loading || askingQuestion}
             error={error}
             setDiagramRequestedFromToolbar={setDiagramRequestedFromToolbar}
           />
         )}
+
+        {/* Fixed Ask AI Button */}
+        <AskAIButton 
+          onClick={handleOpenAskAISidebar}
+          disabled={!editorState.getSelection() || editorState.getSelection().isCollapsed()}
+        />
+
+        {/* AI Answer Modal */}
+        <AIAnswerModal 
+          answer={aiAnswer} 
+          onClose={handleCloseAIAnswer} 
+        />
+        
+        {/* Ask AI Sidebar */}
+        <AskAISidebar
+          isOpen={showAskAISidebar}
+          onClose={() => setShowAskAISidebar(false)}
+          highlightedText={selectedTextForAI}
+          documentContext={editorState.getCurrentContent().getPlainText()}
+          onSubmitQuestion={handleAskQuestion}
+        />
 
         {/* Graph handling */}
         {Object.entries(graphBlocks).map(([blockKey, graphData]) => (

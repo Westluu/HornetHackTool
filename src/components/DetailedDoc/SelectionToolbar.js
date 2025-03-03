@@ -30,6 +30,11 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
   const handleMouseDown = (e) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Add data attributes to mark the event as coming from the toolbar
+    e.fromToolbar = true;
+    e.target.setAttribute('data-toolbar-event', 'true');
+    
     console.log('Toolbar mousedown prevented');
   };
 
@@ -77,6 +82,7 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
         >
           Science
         </button>
+
 
       </div>
 
@@ -327,6 +333,8 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
           )}
         </div>
       )}
+
+
 
     </div>
   );

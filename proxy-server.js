@@ -891,6 +891,64 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+// Add a new endpoint for handling AI questions about document content
+app.post('/api/ask-question', async (req, res) => {
+  try {
+    console.log('\n=== AI Question Request ===');
+    const { highlightedText, documentContext, question } = req.body;
+    
+    if (!highlightedText || !question) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    console.log('Question:', question);
+    console.log('Highlighted text length:', highlightedText.length);
+    console.log('Document context length:', documentContext ? documentContext.length : 0);
+
+    // Create a system message for the AI model
+    const systemMessage = 'You are an educational AI assistant that helps students understand their documents. Provide clear, educational responses that directly address the question.'
+    
+    // Create a user message with the highlighted text and question
+    const userMessage = `
+I need help understanding the following text:
+
+HIGHLIGHTED TEXT:
+${highlightedText}
+
+${documentContext ? `FULL DOCUMENT CONTEXT:
+${documentContext}` : ''}
+
+My question is: ${question}
+
+If my question cannot be answered based on the provided context, please explain why and suggest what information might be needed.
+`;
+
+    // Call the AI API using the existing client
+    const completion = await client.chat.completions.create({
+      model: 'deepseek-r1-distill-llama-70b',
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: userMessage }
+      ],
+      max_tokens: 1000,
+      temperature: 0.7,
+      top_p: 0.95,
+      presence_penalty: 0
+    });
+
+    const answer = completion.choices[0].message.content;
+    console.log('Generated answer length:', answer.length);
+
+    res.json({ answer });
+  } catch (error) {
+    console.error('Error processing AI question:', error);
+    res.status(500).json({ 
+      error: 'Failed to process question', 
+      details: error.message 
+    });
+  }
+});
+
 app.listen(3001, () => {
   console.log('\n=== Server Started ===');
   console.log('Time:', new Date().toISOString());

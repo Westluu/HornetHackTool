@@ -131,3 +131,37 @@ export const analyzePhysicsProblem = async (text) => {
     throw new Error('Failed to analyze physics problem');
   }
 };
+
+export const askQuestionAboutContent = async (highlightedText, documentContext, question) => {
+  try {
+    console.log('Asking AI about content:', question);
+    console.log('Highlighted text length:', highlightedText.length);
+    
+    const response = await fetch('http://localhost:3001/api/ask-question', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        highlightedText, 
+        documentContext, 
+        question 
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data.answer) {
+      throw new Error('Invalid response from AI question service');
+    }
+
+    console.log('AI answer received');
+    return data.answer;
+  } catch (error) {
+    console.error('Error asking question:', error);
+    throw new Error(`Failed to get answer: ${error.message}`);
+  }
+};
