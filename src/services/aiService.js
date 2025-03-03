@@ -75,10 +75,10 @@ export const rewriteText = async (text, style = 'formal') => {
       }
     }
 
-    return `Text: ${text}\n\nRewrite: ${rewrittenText.trim()}`;
+    return rewrittenText.trim();
   } catch (error) {
     console.error('Error rewriting text:', error);
-    return `Text: ${text}\n\nRewrite: Error: ${error.message}`;
+    throw new Error(`Failed to rewrite text: ${error.message}`);
   }
 };
 
@@ -129,5 +129,44 @@ export const analyzePhysicsProblem = async (text) => {
   } catch (error) {
     console.error('Error analyzing physics problem:', error);
     throw new Error('Failed to analyze physics problem');
+  }
+};
+
+export const askQuestionAboutContent = async (highlightedText, documentContext, question) => {
+  try {
+    console.log('Asking AI about content:', question);
+    console.log('Highlighted text length:', highlightedText ? highlightedText.length : 0);
+    console.log('Document context length:', documentContext ? documentContext.length : 0);
+    
+    // Ensure parameters are at least empty strings, not undefined or null
+    const safeHighlightedText = highlightedText || '';
+    const safeDocumentContext = documentContext || '';
+    
+    const response = await fetch('http://localhost:3001/api/ask-question', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        highlightedText: safeHighlightedText, 
+        documentContext: safeDocumentContext, 
+        question 
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data.answer) {
+      throw new Error('Invalid response from AI question service');
+    }
+
+    console.log('AI answer received');
+    return data.answer;
+  } catch (error) {
+    console.error('Error asking question:', error);
+    throw new Error(`Failed to get answer: ${error.message}`);
   }
 };

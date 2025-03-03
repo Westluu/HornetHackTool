@@ -4,13 +4,17 @@ import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
 import { useParams } from 'react-router-dom';
 import { getDocument, saveDocument } from '../../services/localStorageService';
-import { rewriteText } from '../../services/aiService';
+import { rewriteText, askQuestionAboutContent } from '../../services/aiService';
 import { generateChemicalStructure, generatePhysicsDiagram, generate3DChemicalStructure } from '../../services/scienceService';
 import GraphBlock from './GraphBlock';
 import CanvasBlock from './CanvasBlock';
 import TestBlock from './TestBlock';
 import LoadingBlock from './LoadingBlock';
 import SelectionToolbar from './SelectionToolbar';
+import AIAnswerModal from './AIAnswerModal';
+import AskAISidebar from './AskAISidebar';
+import AskAIButton from './AskAIButton';
+import InlineRewriteControl from './InlineRewriteControl';
 
 // Simple component for displaying chemical structure images
 const ImageBlock = (props) => {
@@ -51,6 +55,11 @@ const TextEditor = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [graphBlocks, setGraphBlocks] = useState({});
+  const [aiAnswer, setAIAnswer] = useState(null);
+  const [askingQuestion, setAskingQuestion] = useState(false);
+  const [showAskAISidebar, setShowAskAISidebar] = useState(false);
+  const [selectedTextForAI, setSelectedTextForAI] = useState('');
+  const [inlineRewriteState, setInlineRewriteState] = useState(null);
 
   const customBlockRenderer = (block) => {
     console.log('TextEditor: customBlockRenderer called for block:', block.getKey(), 'type:', block.getType());
@@ -969,8 +978,14 @@ const TextEditor = () => {
     // Save the document content
     await saveDocumentContent(newEditorState);
     
+    // Check if the active element is the toolbar input field
+    const isToolbarInputActive = document.activeElement && 
+      (document.activeElement.getAttribute('data-toolbar-input') === 'true' ||
+       document.activeElement.closest('[data-toolbar-input="true"]'));
+    
     // Only update toolbar position if we're not in the middle of generating a diagram
-    if (!isGeneratingDiagram) {
+    // and not typing in the toolbar input field
+    if (!isGeneratingDiagram && !isToolbarInputActive) {
       // Check for text selection
       const selection = newEditorState.getSelection();
       
@@ -994,6 +1009,9 @@ const TextEditor = () => {
               });
             }
           }
+        } else if (!isToolbarInputActive) {
+          // Only hide the toolbar if we're not typing in a toolbar input
+          setToolbarPosition(null);
         }
       } catch (error) {
         console.error('Error handling selection:', error);
@@ -1083,34 +1101,206 @@ const TextEditor = () => {
 
       if (!selectedText) return;
 
-
       const rewrittenText = await rewriteText(selectedText, style);
       
       if (rewrittenText && rewrittenText !== selectedText) {
-        const newContentState = Modifier.replaceText(
-          contentState,
-          selection,
-          rewrittenText
-        );
-
-      const newEditorState = EditorState.push(
-        editorState,
-        newContentState,
-        'insert-characters'
-      );
-      
-        handleEditorStateChange(newEditorState);
+        console.log('Preparing inline rewrite');
+        
+        // Save the selection information for later use when accepting/rejecting
+        const inlineRewriteData = {
+          originalText: selectedText,
+          rewrittenText: rewrittenText,
+          selectionStart: selection.getStartOffset(),
+          selectionEnd: selection.getEndOffset(),
+          blockKey: selection.getStartKey(),
+          timestamp: Date.now()
+        };
+        
+        console.log('Setting inline rewrite state:', inlineRewriteData);
+        setInlineRewriteState(inlineRewriteData);
+        
+        // Hide the toolbar
+        setToolbarPosition(null);
       }
     } catch (error) {
       console.error('Rewrite error:', error);
       setError(error.message || 'Failed to rewrite text');
     } finally {
       setLoading(false);
-      // Only hide toolbar if no error
-      if (!error) {
-        setToolbarPosition(null);
-      }
     }
+  };
+
+  // Function to open the Ask AI sidebar
+  const handleOpenAskAISidebar = () => {
+    const contentState = editorState.getCurrentContent();
+    const selection = editorState.getSelection();
+    const highlightedText = getSelectedText(contentState, selection);
+    
+    // Always hide the selection toolbar when opening the sidebar
+    setToolbarPosition(null);
+    
+    // Set a flag to prevent toolbar from reappearing due to selection changes
+    // We'll use the isGeneratingDiagram flag since it already prevents toolbar updates
+    setIsGeneratingDiagram(true);
+    
+    // Set a timeout to reset the flag after the sidebar is fully open
+    setTimeout(() => {
+      setIsGeneratingDiagram(false);
+    }, 300);
+    
+    // Set the selected text if any, otherwise empty string
+    setSelectedTextForAI(highlightedText || '');
+    setShowAskAISidebar(true);
+  };
+  
+  // Function to handle asking questions about the selected text
+  const handleAskQuestion = async (question) => {
+    try {
+      setError(null);
+      setAskingQuestion(true);
+      
+      // Get the full document text as additional context
+      const contentState = editorState.getCurrentContent();
+      const fullText = contentState.getBlockMap()
+        .map(block => block.getText())
+        .join('\n');
+      
+      // Call the AI service
+      const answer = await askQuestionAboutContent(selectedTextForAI, fullText, question);
+      return answer; // Return the answer for the sidebar to display
+    } catch (error) {
+      console.error('Error asking question:', error);
+      throw error; // Throw the error for the sidebar to handle
+    } finally {
+      setAskingQuestion(false);
+    }
+  };
+
+  // Function to insert AI answer into the document
+  const handleInsertAnswer = (answer) => {
+    try {
+      // Get the current selection or create one at cursor position
+      const selection = editorState.getSelection();
+      const contentState = editorState.getCurrentContent();
+      
+      // If we have highlighted text, we'll place the answer after it
+      // Otherwise, we'll insert at the current cursor position
+      const selectionAtEnd = selection.merge({
+        anchorOffset: selection.getEndOffset(),
+        focusOffset: selection.getEndOffset(),
+        isBackward: false
+      });
+      
+      // Insert a new line after the selected text or cursor position
+      const contentStateWithNewLine = Modifier.splitBlock(
+        contentState,
+        selectionAtEnd
+      );
+      
+      // Insert the AI answer as regular text
+      const contentStateWithAnswer = Modifier.insertText(
+        contentStateWithNewLine,
+        contentStateWithNewLine.getSelectionAfter(),
+        answer
+      );
+      
+      // Create a new editor state with the answer inserted
+      let newEditorState = EditorState.push(
+        editorState,
+        contentStateWithAnswer,
+        'insert-text'
+      );
+      
+      // Move the selection to the end of the inserted content
+      const finalSelection = newEditorState.getSelection().merge({
+        anchorKey: contentStateWithAnswer.getSelectionAfter().getAnchorKey(),
+        anchorOffset: contentStateWithAnswer.getSelectionAfter().getAnchorOffset(),
+        focusKey: contentStateWithAnswer.getSelectionAfter().getFocusKey(),
+        focusOffset: contentStateWithAnswer.getSelectionAfter().getFocusOffset(),
+        isBackward: false
+      });
+      
+      // Apply the final selection
+      newEditorState = EditorState.forceSelection(newEditorState, finalSelection);
+      
+      // Update the editor state
+      setEditorState(newEditorState);
+      
+      // Save the document with the inserted answer
+      saveDocument(newEditorState);
+      
+      // Close the sidebar after inserting
+      setShowAskAISidebar(false);
+    } catch (error) {
+      console.error('Error inserting AI answer:', error);
+      setError('Failed to insert AI answer into document');
+    }
+  };
+
+
+  // Function to handle accepting the inline rewrite
+  const handleAcceptRewrite = () => {
+    try {
+      console.log('Accepting inline rewrite');
+      if (!inlineRewriteState) return;
+      
+      const { blockKey, selectionStart, selectionEnd, rewrittenText } = inlineRewriteState;
+      const contentState = editorState.getCurrentContent();
+      
+      // Create a selection that covers the original text
+      const rewriteSelection = SelectionState.createEmpty(blockKey).merge({
+        anchorOffset: selectionStart,
+        focusOffset: selectionEnd,
+        isBackward: false
+      });
+      
+      // Replace the original text with the rewritten text
+      const contentStateWithRewrite = Modifier.replaceText(
+        contentState,
+        rewriteSelection,
+        rewrittenText
+      );
+      
+      // Create a new editor state with the rewritten text
+      const newEditorState = EditorState.push(
+        editorState,
+        contentStateWithRewrite,
+        'insert-characters'
+      );
+      
+      // Update the editor state
+      handleEditorStateChange(newEditorState);
+      
+      // Clear the inline rewrite state
+      setInlineRewriteState(null);
+      
+      // Save the document with the changes
+      saveDocument(newEditorState);
+    } catch (error) {
+      console.error('Error accepting rewrite:', error);
+      setError('Failed to apply rewrite');
+      setInlineRewriteState(null);
+    }
+  };
+  
+  // Function to handle rejecting the inline rewrite
+  const handleRejectRewrite = () => {
+    try {
+      console.log('Rejecting inline rewrite');
+      if (!inlineRewriteState) return;
+      
+      // Simply clear the inline rewrite state to dismiss the suggestion
+      setInlineRewriteState(null);
+    } catch (error) {
+      console.error('Error rejecting rewrite:', error);
+      setError('Failed to reject rewrite');
+      setInlineRewriteState(null);
+    }
+  };
+
+  // Function to close the AI answer modal
+  const handleCloseAIAnswer = () => {
+    setAIAnswer(null);
   };
 
   //AI Button Component
@@ -1548,6 +1738,11 @@ const TextEditor = () => {
     }
   };
 
+  // Calculate the editor container class based on whether the sidebar is open
+  const editorContainerClass = showAskAISidebar
+    ? 'bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen transition-all duration-300 ease-in-out mr-96'
+    : 'bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen transition-all duration-300 ease-in-out';
+
   return (
     <div className='bg-[#F8F9FA] min-h-screen pb-16 relative'>
 
@@ -1557,13 +1752,20 @@ const TextEditor = () => {
           editorState={editorState}
           onEditorStateChange={handleEditorStateChange}
           toolbarClassName='sticky top-0 z-50 !justify-center'
-          editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen'
+          editorClassName={editorContainerClass}
           toolbarCustomButtons={[
             <AIButton key="ai-button" />, 
             <button key="diagram-button" onClick={handleGraphClick}>Graph</button>,
             <PhysicsDiagramButton key="physics-diagram-button" />
           ]}
           blockRendererFn={customBlockRenderer}
+          customStyleMap={{
+            'REWRITTEN': {
+              backgroundColor: 'rgba(173, 216, 230, 0.2)',
+              padding: '2px 0',
+              borderBottom: '1px solid #add8e6'
+            }
+          }}
           onBlur={() => console.log('Editor blur event')}
           onFocus={() => console.log('Editor focus event')}
         />
@@ -1576,10 +1778,45 @@ const TextEditor = () => {
             onRewrite={handleRewrite}
             onGraph={handleGraphClick}
             onScienceDiagram={handleScienceDiagram}
-            loading={loading}
+            loading={loading || askingQuestion}
             error={error}
             setDiagramRequestedFromToolbar={setDiagramRequestedFromToolbar}
+            onAskAI={handleOpenAskAISidebar}
           />
+        )}
+
+        {/* Fixed Ask AI Button - Always enabled even when no text is selected */}
+        <AskAIButton 
+          onClick={handleOpenAskAISidebar}
+          disabled={false}
+        />
+
+        {/* AI Answer Modal */}
+        <AIAnswerModal 
+          answer={aiAnswer} 
+          onClose={handleCloseAIAnswer} 
+        />
+        
+        {/* Ask AI Sidebar */}
+        <AskAISidebar
+          isOpen={showAskAISidebar}
+          onClose={() => setShowAskAISidebar(false)}
+          highlightedText={selectedTextForAI}
+          documentContext={editorState.getCurrentContent().getPlainText()}
+          onSubmitQuestion={handleAskQuestion}
+          onInsertAnswer={handleInsertAnswer}
+        />
+
+        {/* Inline Rewrite Control */}
+        {inlineRewriteState && (
+          <div className="inline-rewrite-container fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl">
+            <InlineRewriteControl
+              originalText={inlineRewriteState.originalText}
+              rewrittenText={inlineRewriteState.rewrittenText}
+              onAccept={handleAcceptRewrite}
+              onReject={handleRejectRewrite}
+            />
+          </div>
         )}
 
         {/* Graph handling */}
