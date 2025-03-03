@@ -1139,6 +1139,15 @@ const TextEditor = () => {
     // Always hide the selection toolbar when opening the sidebar
     setToolbarPosition(null);
     
+    // Set a flag to prevent toolbar from reappearing due to selection changes
+    // We'll use the isGeneratingDiagram flag since it already prevents toolbar updates
+    setIsGeneratingDiagram(true);
+    
+    // Set a timeout to reset the flag after the sidebar is fully open
+    setTimeout(() => {
+      setIsGeneratingDiagram(false);
+    }, 300);
+    
     // Set the selected text if any, otherwise empty string
     setSelectedTextForAI(highlightedText || '');
     setShowAskAISidebar(true);
