@@ -1,17 +1,49 @@
-import { convertFromRaw, convertToRaw, EditorState, Modifier, ContentState, ContentBlock, genKey } from 'draft-js';
-import { generateChemicalStructure, generatePhysicsDiagram } from '../../services/scienceService';
-import GraphBlock from './GraphBlock';
-import CanvasBlock from './CanvasBlock';
-import TestBlock from './TestBlock';
-import LoadingBlock from './LoadingBlock';
-import { useEffect, useState } from 'react';
+import { convertFromRaw, convertToRaw, EditorState, Modifier, ContentState, ContentBlock, genKey, SelectionState } from 'draft-js';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Editor } from 'react-draft-wysiwyg';
 import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
 import { useParams } from 'react-router-dom';
 import { getDocument, saveDocument } from '../../services/localStorageService';
 import { rewriteText } from '../../services/aiService';
-
+import { generateChemicalStructure, generatePhysicsDiagram, generate3DChemicalStructure } from '../../services/scienceService';
+import GraphBlock from './GraphBlock';
+import CanvasBlock from './CanvasBlock';
+import TestBlock from './TestBlock';
+import LoadingBlock from './LoadingBlock';
 import SelectionToolbar from './SelectionToolbar';
+
+// Simple component for displaying chemical structure images
+const ImageBlock = (props) => {
+  // Extract src and alt from blockProps or direct props
+  const src = props.blockProps?.src || props.src;
+  const alt = props.blockProps?.alt || props.alt;
+  const onRemove = props.blockProps?.onRemove;
+  
+  if (!src) {
+    console.warn('ImageBlock: Missing src prop', props);
+    return null;
+  }
+  
+  return (
+    <div className='w-full my-4 flex justify-center relative'>
+      <div className='bg-white rounded-lg shadow-lg p-4 text-center'>
+        <img src={src} alt={alt || 'Chemical structure'} className='max-w-full' />
+        {alt && <p className='mt-2 text-sm text-gray-600'>{alt}</p>}
+        
+        {/* Delete button */}
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            className='absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full hover:bg-red-600 flex items-center justify-center'
+            title='Delete chemical structure'
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const TextEditor = () => {
   const [editorState, setEditorState] = useState(EditorState.createEmpty());
@@ -49,15 +81,117 @@ const TextEditor = () => {
             block
           }
         };
-      } else if (entity.getType() === 'IMAGE_BLOCK' || entityData.type === 'image') {
-        return {
-          component: GraphBlock,
-          editable: false,
-          props: {
+      } else if ((entity.getType() === 'IMAGE_BLOCK' || entityData.type === 'image') && entityData.type !== 'canvas') {
+        // Check if this is a chemical structure image from PubChem
+        if (entityData.source === 'pubchem') {
+          console.log('Rendering chemical structure from PubChem', entityData);
+          const blockProps = {
             src: entityData.url,
-            alt: entityData.alt
-          }
-        };
+            alt: entityData.alt,
+            onRemove: () => {
+              // Create a new editor state without this atomic block
+              try {
+                console.log('Removing chemical structure block with key:', block.getKey());
+                const content = editorState.getCurrentContent();
+                
+                // Get the current selection
+                const selection = editorState.getSelection();
+                
+                // Create a selection that targets only this block
+                const targetRange = selection.merge({
+                  anchorKey: block.getKey(),
+                  anchorOffset: 0,
+                  focusKey: block.getKey(),
+                  focusOffset: block.getLength(),
+                });
+                
+                // Create a new state with the selection targeting the block to remove
+                const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+                
+                // Remove the selected content (the atomic block)
+                const newContent = Modifier.removeRange(
+                  content,
+                  targetRange,
+                  'backward'
+                );
+                
+                // Create the new editor state with the block removed
+                const newState = EditorState.push(
+                  stateWithSelection,
+                  newContent,
+                  'remove-range'
+                );
+                
+                // Set the new state
+                setEditorState(newState);
+                console.log('Chemical structure removed successfully');
+              } catch (error) {
+                console.error('Error removing chemical structure:', error);
+              }
+            }
+          };
+          console.log('ImageBlock props being passed:', blockProps);
+          return {
+            component: ImageBlock,
+            editable: false,
+            props: blockProps,
+            blockProps: blockProps  // Try passing props both ways
+          };
+        } else {
+          // Use GraphBlock for other types of images/graphs
+          const graphProps = {
+            src: entityData.url,
+            alt: entityData.alt,
+            equation: entityData.equation, // For compatibility with GraphBlock
+            onRemove: () => {
+              // Create a new editor state without this atomic block
+              try {
+                console.log('Removing graph block with key:', block.getKey());
+                const content = editorState.getCurrentContent();
+                
+                // Get the current selection
+                const selection = editorState.getSelection();
+                
+                // Create a selection that targets only this block
+                const targetRange = selection.merge({
+                  anchorKey: block.getKey(),
+                  anchorOffset: 0,
+                  focusKey: block.getKey(),
+                  focusOffset: block.getLength(),
+                });
+                
+                // Create a new state with the selection targeting the block to remove
+                const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+                
+                // Remove the selected content (the atomic block)
+                const newContent = Modifier.removeRange(
+                  content,
+                  targetRange,
+                  'backward'
+                );
+                
+                // Create the new editor state with the block removed
+                const newState = EditorState.push(
+                  stateWithSelection,
+                  newContent,
+                  'remove-range'
+                );
+                
+                // Set the new state
+                setEditorState(newState);
+                console.log('Graph removed successfully');
+              } catch (error) {
+                console.error('Error removing graph:', error);
+              }
+            }
+          };
+          return {
+            component: GraphBlock,
+            editable: false,
+            props: graphProps,
+            blockProps: graphProps
+          };
+        }
       } else if (entity.getType() === 'TEST_BLOCK') {
         console.log('TextEditor: Rendering TEST_BLOCK entity with data:', entityData);
         return {
@@ -127,12 +261,159 @@ const TextEditor = () => {
       loadContent();
     }
   }, [id]);
+  
+  // Add a global event handler to detect clicks in the document
+  useEffect(() => {
+    // Function to check if an element is part of a 3D diagram or its container
+    const isPartOf3DDiagram = (element) => {
+      while (element) {
+        if (element.getAttribute && (
+            element.getAttribute('data-below-3d-diagram') === 'true' ||
+            element.getAttribute('data-prevent-diagram-generation') === 'true' ||
+            element.getAttribute('data-contains-3d-diagram') === 'true' ||
+            element.getAttribute('data-3d-viewer-element') === 'true' ||
+            element.getAttribute('data-3d-viewer-child') === 'true' ||
+            element.classList.contains('chemical-3d-container') ||
+            element.classList.contains('chemical-3d-diagram') ||
+            element.classList.contains('chemical-3d-viewer-element') ||
+            element.classList.contains('chemical-3d-viewer-child') ||
+            element.classList.contains('below-3d-diagram-area')
+        )) {
+          return true;
+        }
+        element = element.parentElement;
+      }
+      return false;
+    };
+    
+    // Global click handler to detect clicks below 3D diagrams
+    const handleGlobalClick = (e) => {
+      // Check if the click is within a 3D diagram or its container
+      if (isPartOf3DDiagram(e.target)) {
+        console.log('Global handler: Click detected within 3D diagram or container');
+        // Set global flags to prevent diagram generation
+        window.lastClickFromBelowDiagramArea = true;
+        window.typingBelowDiagram = true;
+        // Mark the event to prevent diagram generation
+        e.fromBelowDiagramArea = true;
+      } else {
+        // Reset the flags when clicking elsewhere
+        window.lastClickFromBelowDiagramArea = false;
+        window.typingBelowDiagram = false;
+      }
+    };
+    
+    // Add the global click handler
+    document.addEventListener('click', handleGlobalClick, true);
+    
+    // Cleanup function
+    return () => {
+      document.removeEventListener('click', handleGlobalClick, true);
+    };
+  }, []);
 
-  const handleScienceDiagram = async (field, type) => {
+  // Add a ref to track the last diagram generation time to prevent rapid consecutive generations
+  const lastDiagramGenTime = useRef(0);
+  
+  // Create a ref to track if a diagram generation is in progress
+  const isGeneratingDiagramRef = useRef(false);
+  
+  // Create a ref to store the timeout ID
+  const resetTimeoutRef = useRef(null);
+  
+  const handleScienceDiagram = async (field, type, event) => {
     try {
       console.log('handleScienceDiagram called with:', field, type);
+      
+      // Check if this is a toolbar-initiated request (either through state or event attributes)
+      // Also check for the explicit fromToolbarButton flag
+      const isToolbarRequest = diagramRequestedFromToolbar || 
+                              (event && event.diagramRequest === true) || 
+                              (event && event.fromToolbarButton === true);
+      
+      // Check if the event has a fromBelowDiagramArea flag or if the global flag is set, which would indicate
+      // this is from a click below a diagram - in that case, we should NOT generate a diagram
+      if ((event && event.fromBelowDiagramArea) || window.lastClickFromBelowDiagramArea || window.typingBelowDiagram) {
+        console.log('Ignoring diagram generation - click was below diagram area or typing below diagram');
+        return;
+      }
+      
+      // If this event has the fromToolbarButton flag, skip the element checks
+      // This ensures that toolbar button clicks always generate diagrams
+      if (!(event && event.fromToolbarButton === true)) {
+        // Additional check for elements with data-below-3d-diagram attribute or data-prevent-diagram-generation attribute
+        if (event && event.target) {
+          let element = event.target;
+          while (element) {
+            if (element.getAttribute && 
+                (element.getAttribute('data-below-3d-diagram') === 'true' || 
+                 element.getAttribute('data-prevent-diagram-generation') === 'true' ||
+                 element.getAttribute('data-contains-3d-diagram') === 'true' ||
+                 element.getAttribute('data-3d-viewer-element') === 'true' ||
+                 element.getAttribute('data-3d-viewer-child') === 'true' ||
+                 element.classList.contains('chemical-3d-container') ||
+                 element.classList.contains('chemical-3d-diagram') ||
+                 element.classList.contains('chemical-3d-viewer-element') ||
+                 element.classList.contains('chemical-3d-viewer-child') ||
+                 element.classList.contains('below-3d-diagram-area'))) {
+              console.log('Ignoring diagram generation - click was on or within a 3D diagram or its container');
+              return;
+            }
+            element = element.parentElement;
+          }
+        }
+      } else {
+        console.log('Proceeding with diagram generation - explicit toolbar button click detected');
+      }
+      
+      // Only proceed if the diagram was explicitly requested from the toolbar or a toolbar button
+      // This prevents diagrams from being generated when clicking in the editor
+      if (!isToolbarRequest) {
+        console.log('Ignoring diagram generation - not requested from toolbar');
+        return;
+      }
+      
+      // Check if we're already generating a diagram to prevent multiple generations
+      if (isGeneratingDiagramRef.current) {
+        console.log('Diagram generation already in progress, ignoring this request');
+        return;
+      }
+      
+      // Set the flag to indicate we're generating a diagram
+      isGeneratingDiagramRef.current = true;
+      
+      // Reset the diagram request flag immediately to prevent accidental triggering
+      setDiagramRequestedFromToolbar(false);
+      
+      // Prevent rapid consecutive diagram generations (debounce)
+      const now = Date.now();
+      const timeSinceLastGeneration = now - lastDiagramGenTime.current;
+      if (timeSinceLastGeneration < 2000) { // 2 seconds debounce
+        console.log(`Ignoring diagram generation request - too soon (${timeSinceLastGeneration}ms since last generation)`);
+        isGeneratingDiagramRef.current = false; // Reset the flag
+        return;
+      }
+      
+      // Update the last generation time
+      lastDiagramGenTime.current = now;
+      
       setError(null);
       setLoading(true);
+      
+      // Set flag to prevent toolbar from disappearing
+      setIsGeneratingDiagram(true);
+      
+      // Set a timeout to reset the isGeneratingDiagramRef flag in case of errors
+      resetTimeoutRef.current = setTimeout(() => {
+        if (isGeneratingDiagramRef.current) {
+          console.log('Resetting diagram generation flag after timeout');
+          isGeneratingDiagramRef.current = false;
+        }
+      }, 10000); // 10 second timeout
+      
+      // Preserve the toolbar position during diagram generation
+      // We're setting the isGeneratingDiagram flag instead of using this variable directly
+      // const currentToolbarPosition = toolbarPosition;
       
       const contentState = editorState.getCurrentContent();
       const selection = editorState.getSelection();
@@ -162,8 +443,16 @@ const TextEditor = () => {
       console.log('Generating diagram for field:', field, 'type:', type);
       
       if (field.toLowerCase() === 'chemistry') {
-        console.log('Generating chemical structure');
-        result = await generateChemicalStructure(selectedText, type.toUpperCase());
+        console.log('Generating chemical structure using PubChem');
+        // Check if we need 2D or 3D structure
+        if (type.toUpperCase() === '3D') {
+          console.log('Generating 3D chemical structure');
+          result = await generate3DChemicalStructure(selectedText);
+        } else {
+          // Default to 2D structure
+          console.log('Generating 2D chemical structure');
+          result = await generateChemicalStructure(selectedText, '2D');
+        }
       } else if (field.toLowerCase() === 'physics') {
         console.log('Generating physics diagram');
         result = await generatePhysicsDiagram(selectedText, `${type.toUpperCase()}_DIAGRAM`);
@@ -211,12 +500,27 @@ const TextEditor = () => {
             entityKey
           );
           
-          const newEditorState = EditorState.push(
+          // Create a new editor state with the diagram inserted
+          let newEditorState = EditorState.push(
             editorState,
             contentStateWithEntity2,
             'insert-fragment'
           );
-
+          
+          // Move the selection to the end of the inserted content and collapse it
+          // This ensures no text is selected after diagram insertion
+          const finalSelection = newEditorState.getSelection().merge({
+            anchorKey: contentStateWithEntity2.getSelectionAfter().getAnchorKey(),
+            anchorOffset: contentStateWithEntity2.getSelectionAfter().getAnchorOffset(),
+            focusKey: contentStateWithEntity2.getSelectionAfter().getFocusKey(),
+            focusOffset: contentStateWithEntity2.getSelectionAfter().getFocusOffset(),
+            isBackward: false,
+            hasFocus: true
+          });
+          
+          // Apply the collapsed selection
+          newEditorState = EditorState.forceSelection(newEditorState, finalSelection);
+          
           handleEditorStateChange(newEditorState);
           setToolbarPosition(null);
           setLoading(false);
@@ -265,11 +569,26 @@ const TextEditor = () => {
         entityKey
       );
       
-      const newEditorState = EditorState.push(
+      // Create a new editor state with the diagram inserted
+      let newEditorState = EditorState.push(
         editorState,
         contentStateWithEntity2,
         'insert-fragment'
       );
+      
+      // Move the selection to the end of the inserted content and collapse it
+      // This ensures no text is selected after diagram insertion
+      const finalSelection = newEditorState.getSelection().merge({
+        anchorKey: contentStateWithEntity2.getSelectionAfter().getAnchorKey(),
+        anchorOffset: contentStateWithEntity2.getSelectionAfter().getAnchorOffset(),
+        focusKey: contentStateWithEntity2.getSelectionAfter().getFocusKey(),
+        focusOffset: contentStateWithEntity2.getSelectionAfter().getFocusOffset(),
+        isBackward: false,
+        hasFocus: true
+      });
+      
+      // Apply the collapsed selection
+      newEditorState = EditorState.forceSelection(newEditorState, finalSelection);
 
       handleEditorStateChange(newEditorState);
       setToolbarPosition(null);
@@ -277,11 +596,364 @@ const TextEditor = () => {
       console.error('Science diagram error:', error);
       setError(error.message || 'Failed to generate diagram');
     } finally {
+      // Clear the timeout to prevent memory leaks
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+        resetTimeoutRef.current = null;
+      }
+      
       setLoading(false);
+      
+      // Immediately reset the diagram generation flags
+      // This prevents any potential issues with the flags staying active
+      setIsGeneratingDiagram(false);
+      isGeneratingDiagramRef.current = false;
+      
+      // Log the completion of diagram generation
+      console.log('Diagram generation completed, all flags reset');
     }
   };
 
+  // Create a ref for the toolbar to prevent it from disappearing
+  const toolbarRef = useRef(null);
+  const editorRef = useRef(null);
+  
+  // Flag to prevent toolbar position reset during science diagram generation
+  const [isGeneratingDiagram, setIsGeneratingDiagram] = useState(false);
+  
+  // Flag to track if a diagram was requested through the toolbar
+  const [diagramRequestedFromToolbar, setDiagramRequestedFromToolbar] = useState(false);
+  
+  // Function to ensure we can type below diagrams
+  const ensureTypingBelowDiagrams = useCallback(() => {
+    console.log('Ensuring typing below diagrams');
+    
+    // Get the current editor state
+    const contentState = editorState.getCurrentContent();
+    const blocks = contentState.getBlocksAsArray();
+    
+    // Find atomic blocks (diagrams)
+    const diagramBlocks = blocks.filter(block => block.getType() === 'atomic');
+    
+    if (diagramBlocks.length > 0) {
+      // Get the last diagram block
+      const lastDiagramBlock = diagramBlocks[diagramBlocks.length - 1];
+      const lastDiagramIndex = blocks.findIndex(block => block.getKey() === lastDiagramBlock.getKey());
+      
+      // Check if there's a block after the last diagram
+      if (lastDiagramIndex === blocks.length - 1) {
+        console.log('No block after the diagram, creating one');
+        // No block after the diagram, create one
+        const targetKey = lastDiagramBlock.getKey();
+        
+        // Create a selection at the end of the diagram block
+        const newSelection = SelectionState.createEmpty(targetKey).merge({
+          anchorOffset: lastDiagramBlock.getLength(),
+          focusOffset: lastDiagramBlock.getLength(),
+          hasFocus: true,
+        });
+        
+        // Split the block to create a new empty block
+        const contentWithSplit = Modifier.splitBlock(contentState, newSelection);
+        let newEditorState = EditorState.push(editorState, contentWithSplit, 'split-block');
+        
+        // Get the new content state and blocks
+        const newContentState = newEditorState.getCurrentContent();
+        const newBlocks = newContentState.getBlocksAsArray();
+        
+        // Find the newly created block (it should be the last one)
+        const newBlockKey = newBlocks[newBlocks.length - 1].getKey();
+        
+        // Create a selection at the beginning of the new block
+        const finalSelection = SelectionState.createEmpty(newBlockKey).merge({
+          anchorOffset: 0,
+          focusOffset: 0,
+          hasFocus: true,
+        });
+        
+        // Force the selection to the new block
+        newEditorState = EditorState.forceSelection(newEditorState, finalSelection);
+        
+        // Update the editor state
+        setEditorState(newEditorState);
+        
+        // Focus the editor
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.focus();
+          }
+        }, 50);
+        
+        return true;
+      } else {
+        // There is a block after the diagram, just move the cursor there
+        console.log('Block after diagram exists, moving cursor there');
+        const nextBlockKey = blocks[lastDiagramIndex + 1].getKey();
+        
+        // Create a selection at the beginning of the next block
+        const newSelection = SelectionState.createEmpty(nextBlockKey).merge({
+          anchorOffset: 0,
+          focusOffset: 0,
+          hasFocus: true,
+        });
+        
+        // Force the selection to the next block
+        const newEditorState = EditorState.forceSelection(editorState, newSelection);
+        
+        // Update the editor state
+        setEditorState(newEditorState);
+        
+        // Focus the editor
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.focus();
+          }
+        }, 50);
+        
+        return true;
+      }
+    }
+    
+    return false;
+  }, [editorState, editorRef]);
+  
+  // Expose the reset function globally so the 3D viewer can access it
+  useEffect(() => {
+    // Initialize global flags
+    window.typingBelowDiagram = false;
+    window.lastClickFromBelowDiagramArea = false;
+    
+    // Create a global function to reset the diagram request flag
+    window.resetDiagramRequestFlag = () => {
+      console.log('Global resetDiagramRequestFlag called');
+      setDiagramRequestedFromToolbar(false);
+    };
+    
+    // Create a global function to focus the editor and ensure typing below diagrams
+    window.focusEditor = () => {
+      console.log('Global focusEditor called');
+      // Set the global flags
+      window.typingBelowDiagram = true;
+      window.lastClickFromBelowDiagramArea = true;
+      
+      // Set a timeout to keep these flags active for a short period
+      // This prevents diagram regeneration when clicking below a diagram
+      if (window.focusEditorTimeout) {
+        clearTimeout(window.focusEditorTimeout);
+      }
+      
+      window.focusEditorTimeout = setTimeout(() => {
+        // Don't reset the flags immediately - keep them active for a bit longer
+        // This ensures that any click events that might be processed after this
+        // still have the flags set
+        console.log('Keeping diagram prevention flags active');
+        
+        // Set another timeout to eventually reset the flags
+        setTimeout(() => {
+          // Only reset if we're not currently typing below a diagram
+          if (!document.querySelector('.below-3d-diagram-area:focus')) {
+            console.log('Resetting diagram prevention flags');
+            window.typingBelowDiagram = false;
+            window.lastClickFromBelowDiagramArea = false;
+          }
+        }, 1000); // Keep flags active for 1 second after focusing
+      }, 500);
+      
+      // Call our function to ensure we can type below diagrams
+      ensureTypingBelowDiagrams();
+      
+      // Focus the editor
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.focus();
+        }
+      }, 50);
+    };
+    
+    // Cleanup
+    return () => {
+      // Clear any pending timeouts
+      if (window.focusEditorTimeout) {
+        clearTimeout(window.focusEditorTimeout);
+      }
+      
+      // Remove global variables
+      delete window.resetDiagramRequestFlag;
+      delete window.focusEditor;
+      delete window.focusEditorTimeout;
+      delete window.typingBelowDiagram;
+      delete window.lastClickFromBelowDiagramArea;
+    };
+  }, [ensureTypingBelowDiagrams, editorRef]);
+  
+  // Memoize the function to check if a click is inside the toolbar
+  const isClickInsideToolbar = useCallback((event) => {
+    return toolbarRef.current && toolbarRef.current.contains(event.target);
+  }, []);
+  
+  // Handle clicks outside the toolbar
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // If click is outside toolbar and we're not generating a diagram, hide the toolbar
+      if (!isClickInsideToolbar(event) && !isGeneratingDiagram) {
+        setToolbarPosition(null);
+      }
+    };
+    
+    // Add event listener
+    document.addEventListener('mousedown', handleClickOutside);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isClickInsideToolbar, isGeneratingDiagram]);
+  
+  // Global handler to prevent unwanted diagram generation
+  useEffect(() => {
+    // Function to check if a click is near or on a 3D diagram
+    const isClickNear3DDiagram = (event) => {
+      // Don't interfere if the click is on a toolbar button
+      // Check if the click target or any of its parents have the toolbar button class
+      let element = event.target;
+      while (element) {
+        // Check if this is a toolbar button or inside the selection toolbar
+        if (element.classList && (
+            element.classList.contains('bg-blue-100') || // Toolbar buttons have this class
+            element.getAttribute('data-toolbar-button') === 'true' ||
+            (element.getAttribute && element.getAttribute('data-toolbar') === 'true')
+          )) {
+          console.log('Click detected on toolbar button, allowing diagram generation');
+          return false;
+        }
+        element = element.parentElement;
+      }
+      
+      // Find all 3D diagram containers
+      const diagramContainers = document.querySelectorAll('[data-diagram-type="chemical3d"], [data-contains-3d-diagram="true"]');
+      
+      // Check if click is inside or near any 3D diagram (but not below it)
+      for (const container of diagramContainers) {
+        const rect = container.getBoundingClientRect();
+        
+        // Add a buffer zone around the sides and top of the diagram (30px)
+        // But don't add buffer below the diagram to allow clicking there for text editing
+        const sideBuffer = 30;
+        const topBuffer = 30;
+        
+        if (
+          event.clientX >= rect.left - sideBuffer &&
+          event.clientX <= rect.right + sideBuffer &&
+          event.clientY >= rect.top - topBuffer &&
+          event.clientY <= rect.bottom
+        ) {
+          console.log('Click detected near 3D diagram, preventing diagram generation');
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    // Global click handler
+    const handleGlobalClick = (event) => {
+      // Check if this is a click below a 3D diagram
+      let isClickBelowDiagram = false;
+      
+      // Find all 3D diagram containers
+      const diagramContainers = document.querySelectorAll('[data-diagram-type="chemical3d"], [data-contains-3d-diagram="true"]');
+      
+      // Check if we're clicking in the editor below a 3D diagram
+      let element = event.target;
+      let isEditorElement = false;
+      
+      while (element) {
+        if (element.classList && element.classList.contains('DraftEditor-root')) {
+          isEditorElement = true;
+          break;
+        }
+        element = element.parentElement;
+      }
+      
+      if (isEditorElement) {
+        for (const container of diagramContainers) {
+          const rect = container.getBoundingClientRect();
+          if (
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY > rect.bottom &&
+            event.clientY < rect.bottom + 50 // Only consider clicks within 50px below the diagram
+          ) {
+            isClickBelowDiagram = true;
+            break;
+          }
+        }
+      }
+      
+      // If click is below a 3D diagram, handle it specially
+      if (isClickBelowDiagram) {
+        console.log('Global click handler: Click detected below 3D diagram, ensuring text editing');
+        
+        // Reset all diagram generation flags
+        setDiagramRequestedFromToolbar(false);
+        isGeneratingDiagramRef.current = false;
+        setIsGeneratingDiagram(false);
+        
+        // Set a flag directly on the window object to indicate this is a click below a diagram
+        // This will be used to prevent diagram generation when clicking below diagrams
+        window.lastClickFromBelowDiagramArea = true;
+        
+        // Set a global flag to indicate we're typing below a diagram
+        window.typingBelowDiagram = true;
+        
+        // Call our function to ensure we can type below diagrams
+        ensureTypingBelowDiagrams();
+        
+        // Focus the editor
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.focus();
+          }
+        }, 50);
+        
+        return;
+      }
+      
+      // Reset the global flags if we're not clicking below a diagram
+      window.typingBelowDiagram = false;
+      window.lastClickFromBelowDiagramArea = false;
+      
+      // If click is near a 3D diagram, ensure diagram flag is reset
+      if (isClickNear3DDiagram(event)) {
+        // Force reset the diagram request flag
+        setDiagramRequestedFromToolbar(false);
+      }
+    };
+    
+    // Add global click handler
+    document.addEventListener('click', handleGlobalClick, true); // Use capture phase
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('click', handleGlobalClick, true);
+    };
+  }, [ensureTypingBelowDiagrams, isGeneratingDiagramRef, setDiagramRequestedFromToolbar, setIsGeneratingDiagram]);
+  
   const handleEditorStateChange = async (newEditorState) => {
+    // Check if we're typing below a diagram (using the global flag)
+    if (window.typingBelowDiagram) {
+      console.log('Typing below diagram detected, ensuring no diagram generation');
+      // Forcefully reset all diagram generation flags
+      setDiagramRequestedFromToolbar(false);
+      isGeneratingDiagramRef.current = false;
+      setIsGeneratingDiagram(false);
+    } else {
+      // Always reset the diagram request flag when typing or editing content
+      // This prevents unwanted diagram generation when typing near diagrams
+      setDiagramRequestedFromToolbar(false);
+      isGeneratingDiagramRef.current = false;
+      setIsGeneratingDiagram(false);
+    }
+    
     setEditorState(newEditorState);
     
     // Debug: Log all blocks in the editor state
@@ -294,29 +966,43 @@ const TextEditor = () => {
       hasEntity: block.getEntityAt(0) !== null
     })));
     
-    // Check for text selection
-    const selection = newEditorState.getSelection();
-    const selectedText = getSelectedText(contentState, selection);
+    // Save the document content
+    await saveDocumentContent(newEditorState);
+    
+    // Only update toolbar position if we're not in the middle of generating a diagram
+    if (!isGeneratingDiagram) {
+      // Check for text selection
+      const selection = newEditorState.getSelection();
+      
+      try {
+        // Only show the toolbar when there's a selection, but don't automatically generate diagrams
+        if (selection && !selection.isCollapsed()) {
+          const selectedText = getSelectedText(contentState, selection);
+          
+          if (selectedText) {
+            const domSelection = window.getSelection();
+            if (domSelection && domSelection.rangeCount > 0) {
+              const selectionRect = domSelection.getRangeAt(0).getBoundingClientRect();
+              const windowHeight = window.innerHeight;
+              const toolbarHeight = 300; // Approximate height of toolbar
 
-    if (selectedText && !selection.isCollapsed()) {
-      const selection = window.getSelection();
-      if (selection.rangeCount > 0) {
-        const selectionRect = selection.getRangeAt(0).getBoundingClientRect();
-        const windowHeight = window.innerHeight;
-        const toolbarHeight = 300; // Approximate height of toolbar
-
-        // If selection is in bottom half of screen, show toolbar above selection
-        const isNearBottom = selectionRect.top > windowHeight - toolbarHeight - 100;
-        
-        setToolbarPosition({
-          top: isNearBottom ? selectionRect.top - toolbarHeight - 10 : selectionRect.top + window.scrollY
-        });
+              // If selection is in bottom half of screen, show toolbar above selection
+              const isNearBottom = selectionRect.top > windowHeight - toolbarHeight - 100;
+              
+              setToolbarPosition({
+                top: isNearBottom ? selectionRect.top - toolbarHeight - 10 : selectionRect.top + window.scrollY
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error handling selection:', error);
       }
-    } else {
-      setToolbarPosition(null);
     }
+  };
 
-    // Save document
+  // Save document directly in the handleEditorStateChange function
+  const saveDocumentContent = async (newEditorState) => {
     try {
       if (id) {
         const existingDoc = await getDocument(id);
@@ -595,6 +1281,7 @@ const TextEditor = () => {
         onClick={() => {
           console.log('PhysicsDiagramButton clicked');
           try {
+            setDiagramRequestedFromToolbar(true);
             handleScienceDiagram('physics', 'force');
           } catch (error) {
             console.error('Error in PhysicsDiagramButton click handler:', error);
@@ -603,6 +1290,29 @@ const TextEditor = () => {
         }}
       >
         Physics Diagram
+      </button>
+      <button
+        style={{
+          padding: '5px 10px',
+          margin: '5px',
+          backgroundColor: '#e91e63',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+        onClick={() => {
+          console.log('3D Chemical Structure button clicked');
+          try {
+            setDiagramRequestedFromToolbar(true);
+            handleScienceDiagram('chemistry', '3D');
+          } catch (error) {
+            console.error('Error in 3D Chemical Structure click handler:', error);
+            alert('Error creating 3D chemical structure: ' + error.message);
+          }
+        }}
+      >
+        3D Chemical Structure
       </button>
       <button
         style={{
@@ -636,37 +1346,128 @@ const TextEditor = () => {
   );
 
   const handleRemoveGraph = (blockKey) => {
-    // Remove the graph block from state
-    const newGraphBlocks = { ...graphBlocks };
-    delete newGraphBlocks[blockKey];
-    setGraphBlocks(newGraphBlocks);
-  };
-
-  const handleRemoveCanvasBlock = (blockKey) => {
-    // Remove the canvas block from the editor state
-    const contentState = editorState.getCurrentContent();
-    const blocks = contentState.getBlocksAsArray();
-    
-    // Find the block with the given key
-    const blockIndex = blocks.findIndex(block => block.getKey() === blockKey);
-    
-    if (blockIndex !== -1) {
-      // Create a new array without the block to be removed
-      const newBlocks = [...blocks];
-      newBlocks.splice(blockIndex, 1);
+    console.log('Removing graph with key:', blockKey);
+    try {
+      // Get the current content state and selection
+      const content = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
       
-      // Create a new content state with the updated blocks
-      const newContentState = ContentState.createFromBlockArray(newBlocks);
+      // Create a selection that targets only this block
+      const targetRange = selection.merge({
+        anchorKey: blockKey,
+        anchorOffset: 0,
+        focusKey: blockKey,
+        focusOffset: content.getBlockForKey(blockKey).getLength(),
+      });
       
-      // Push the new content state to the editor
-      const newEditorState = EditorState.push(
-        editorState,
-        newContentState,
+      // Create a new state with the selection targeting the block to remove
+      const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+      
+      // Remove the selected content (the atomic block)
+      const newContent = Modifier.removeRange(
+        content,
+        targetRange,
+        'backward'
+      );
+      
+      // Create the new editor state with the block removed
+      const newState = EditorState.push(
+        stateWithSelection,
+        newContent,
         'remove-range'
       );
       
-      // Update the editor state
-      handleEditorStateChange(newEditorState);
+      // Set the new state
+      setEditorState(newState);
+      
+      // Also remove from graphBlocks state
+      const updatedGraphBlocks = { ...graphBlocks };
+      delete updatedGraphBlocks[blockKey];
+      setGraphBlocks(updatedGraphBlocks);
+      
+      console.log('Graph removed successfully');
+    } catch (error) {
+      console.error('Error removing graph:', error);
+      // Fallback to the old method if the new method fails
+      try {
+        // Remove the graph block from state only
+        const newGraphBlocks = { ...graphBlocks };
+        delete newGraphBlocks[blockKey];
+        setGraphBlocks(newGraphBlocks);
+        console.log('Graph removed using fallback method');
+      } catch (fallbackError) {
+        console.error('Fallback method also failed:', fallbackError);
+      }
+    }
+  };
+
+  const handleRemoveCanvasBlock = (blockKey) => {
+    console.log('Removing canvas block with key:', blockKey);
+    try {
+      // Get the current content state and selection
+      const content = editorState.getCurrentContent();
+      const selection = editorState.getSelection();
+      
+      // Create a selection that targets only this block
+      const targetRange = selection.merge({
+        anchorKey: blockKey,
+        anchorOffset: 0,
+        focusKey: blockKey,
+        focusOffset: content.getBlockForKey(blockKey).getLength(),
+      });
+      
+      // Create a new state with the selection targeting the block to remove
+      const stateWithSelection = EditorState.forceSelection(editorState, targetRange);
+      
+      // Remove the selected content (the atomic block)
+      const newContent = Modifier.removeRange(
+        content,
+        targetRange,
+        'backward'
+      );
+      
+      // Create the new editor state with the block removed
+      const newState = EditorState.push(
+        stateWithSelection,
+        newContent,
+        'remove-range'
+      );
+      
+      // Set the new state
+      setEditorState(newState);
+      console.log('Canvas block removed successfully');
+    } catch (error) {
+      console.error('Error removing canvas block:', error);
+      // Fallback to the old method if the new method fails
+      try {
+        const contentState = editorState.getCurrentContent();
+        const blocks = contentState.getBlocksAsArray();
+        
+        // Find the block with the given key
+        const blockIndex = blocks.findIndex(block => block.getKey() === blockKey);
+        
+        if (blockIndex !== -1) {
+          // Create a new array without the block to be removed
+          const newBlocks = [...blocks];
+          newBlocks.splice(blockIndex, 1);
+          
+          // Create a new content state with the updated blocks
+          const newContentState = ContentState.createFromBlockArray(newBlocks);
+          
+          // Push the new content state to the editor
+          const newEditorState = EditorState.push(
+            editorState,
+            newContentState,
+            'remove-range'
+          );
+          
+          // Update the editor state
+          setEditorState(newEditorState);
+          console.log('Canvas block removed using fallback method');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback method also failed:', fallbackError);
+      }
     }
   };
 
@@ -752,6 +1553,7 @@ const TextEditor = () => {
 
       <div className='relative'>
         <Editor
+          ref={editorRef}
           editorState={editorState}
           onEditorStateChange={handleEditorStateChange}
           toolbarClassName='sticky top-0 z-50 !justify-center'
@@ -767,14 +1569,16 @@ const TextEditor = () => {
         />
 
         {/* Selection toolbar */}
-        {toolbarPosition && (
+        {toolbarPosition && editorState.getSelection() && !editorState.getSelection().isCollapsed() && (
           <SelectionToolbar
+            ref={toolbarRef}
             position={toolbarPosition}
             onRewrite={handleRewrite}
             onGraph={handleGraphClick}
             onScienceDiagram={handleScienceDiagram}
             loading={loading}
             error={error}
+            setDiagramRequestedFromToolbar={setDiagramRequestedFromToolbar}
           />
         )}
 

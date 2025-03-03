@@ -1,3 +1,57 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 3D Diagram Styling */
+.chemical-3d-container {
+  position: relative;
+  z-index: 10;
+  margin-bottom: 20px;
+}
+
+.chemical-3d-container::after {
+  content: '';
+  display: block;
+  height: 10px;
+  width: 100%;
+  position: absolute;
+  bottom: -10px;
+  left: 0;
+  cursor: text;
+  z-index: 5;
+}
+
+.chemical-3d-viewer-element,
+.chemical-3d-viewer-child {
+  cursor: default !important;
+}
+
+/* Ensure cursor returns to text below diagrams */
+[data-contains-3d-diagram="true"] + * {
+  cursor: text !important;
+}
+
+/* Special area below 3D diagrams */
+.below-3d-diagram-area {
+  position: relative;
+  z-index: 20;
+  cursor: text !important;
+  margin-top: 5px;
+  margin-bottom: 5px;
+  background-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 5px;
+  transition: background-color 0.2s ease;
+}
+
+.below-3d-diagram-area:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.below-3d-diagram-area span {
+  font-size: 14px;
+  font-style: italic;
+}
