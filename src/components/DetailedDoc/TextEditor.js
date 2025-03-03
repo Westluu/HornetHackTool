@@ -1135,14 +1135,12 @@ const TextEditor = () => {
     const selection = editorState.getSelection();
     const highlightedText = getSelectedText(contentState, selection);
     
-    if (highlightedText) {
-      setSelectedTextForAI(highlightedText);
-      setShowAskAISidebar(true);
-      // Hide the selection toolbar
-      setToolbarPosition(null);
-    } else {
-      setError('No text selected');
-    }
+    // Always hide the selection toolbar when opening the sidebar
+    setToolbarPosition(null);
+    
+    // Set the selected text if any, otherwise empty string
+    setSelectedTextForAI(highlightedText || '');
+    setShowAskAISidebar(true);
   };
   
   // Function to handle asking questions about the selected text
@@ -1639,13 +1637,14 @@ const TextEditor = () => {
             loading={loading || askingQuestion}
             error={error}
             setDiagramRequestedFromToolbar={setDiagramRequestedFromToolbar}
+            onAskAI={handleOpenAskAISidebar}
           />
         )}
 
-        {/* Fixed Ask AI Button */}
+        {/* Fixed Ask AI Button - Always enabled even when no text is selected */}
         <AskAIButton 
           onClick={handleOpenAskAISidebar}
-          disabled={!editorState.getSelection() || editorState.getSelection().isCollapsed()}
+          disabled={false}
         />
 
         {/* AI Answer Modal */}

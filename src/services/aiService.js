@@ -135,7 +135,12 @@ export const analyzePhysicsProblem = async (text) => {
 export const askQuestionAboutContent = async (highlightedText, documentContext, question) => {
   try {
     console.log('Asking AI about content:', question);
-    console.log('Highlighted text length:', highlightedText.length);
+    console.log('Highlighted text length:', highlightedText ? highlightedText.length : 0);
+    console.log('Document context length:', documentContext ? documentContext.length : 0);
+    
+    // Ensure parameters are at least empty strings, not undefined or null
+    const safeHighlightedText = highlightedText || '';
+    const safeDocumentContext = documentContext || '';
     
     const response = await fetch('http://localhost:3001/api/ask-question', {
       method: 'POST',
@@ -143,8 +148,8 @@ export const askQuestionAboutContent = async (highlightedText, documentContext, 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ 
-        highlightedText, 
-        documentContext, 
+        highlightedText: safeHighlightedText, 
+        documentContext: safeDocumentContext, 
         question 
       })
     });

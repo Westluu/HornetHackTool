@@ -897,19 +897,25 @@ app.post('/api/ask-question', async (req, res) => {
     console.log('\n=== AI Question Request ===');
     const { highlightedText, documentContext, question } = req.body;
     
-    if (!highlightedText || !question) {
-      return res.status(400).json({ error: 'Missing required parameters' });
+    if (!question) {
+      return res.status(400).json({ error: 'Question is required' });
     }
+    
+    // highlightedText can be empty - in that case, we'll just use the document context
 
     console.log('Question:', question);
     console.log('Highlighted text length:', highlightedText.length);
     console.log('Document context length:', documentContext ? documentContext.length : 0);
 
     // Create a system message for the AI model
-    const systemMessage = 'You are an educational AI assistant that helps students understand their documents. Provide clear, educational responses that directly address the question.'
+    const systemMessage = 'You are an educational AI assistant that helps students understand their documents and provides helpful information. If the question relates to the provided context, focus your answer on that. If the question is general or the context is insufficient, provide a helpful general answer based on your knowledge.'
     
-    // Create a user message with the highlighted text and question
-    const userMessage = `
+    // Create a user message based on available context
+    let userMessage;
+    
+    if (highlightedText) {
+      // If there's highlighted text, focus on that
+      userMessage = `
 I need help understanding the following text:
 
 HIGHLIGHTED TEXT:
@@ -920,8 +926,27 @@ ${documentContext}` : ''}
 
 My question is: ${question}
 
-If my question cannot be answered based on the provided context, please explain why and suggest what information might be needed.
+If my question cannot be answered based on the provided context, please provide a helpful general answer.
 `;
+    } else if (documentContext && documentContext.trim().length > 0) {
+      // If there's document context but no highlighted text
+      userMessage = `
+I have a question about the following document:
+
+DOCUMENT CONTEXT:
+${documentContext}
+
+My question is: ${question}
+
+If my question cannot be answered based on the provided context, please provide a helpful general answer.
+`;
+    } else {
+      // If there's no context at all, just answer the question directly
+      userMessage = `My question is: ${question}
+
+Please provide a helpful and informative answer to this question based on your knowledge.
+`;
+    }
 
     // Call the AI API using the existing client
     const completion = await client.chat.completions.create({

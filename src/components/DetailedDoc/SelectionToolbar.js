@@ -19,7 +19,7 @@ const STYLES = {
   CONCISE: 'concise'
 };
 
-const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGraph, onScienceDiagram, setDiagramRequestedFromToolbar }, ref) => {
+const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGraph, onScienceDiagram, setDiagramRequestedFromToolbar, onAskAI }, ref) => {
   const [mode, setMode] = useState(MODES.TEXT);
   const [scienceField, setScienceField] = useState(SCIENCE_FIELDS.CHEMISTRY);
   
@@ -50,6 +50,23 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
       onMouseDown={handleMouseDown}
       data-toolbar="true"
     >
+      {/* Ask AI Button */}
+      <div className="mb-4">
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onAskAI();
+          }}
+          className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+          Ask AI
+        </button>
+      </div>
+
       {/* Mode Toggle Buttons */}
       <div className="flex gap-2 mb-4">
         <button
@@ -82,8 +99,6 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
         >
           Science
         </button>
-
-
       </div>
 
       {/* Content based on mode */}

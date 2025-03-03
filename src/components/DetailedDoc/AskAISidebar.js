@@ -83,7 +83,7 @@ const AskAISidebar = ({
         </button>
       </div>
       
-      {/* Selected Text */}
+      {/* Selected Text (only shown if text is selected) */}
       {highlightedText && (
         <div className="p-4 bg-blue-50 border-b border-gray-200">
           <h3 className="font-medium text-blue-800 mb-1">Selected Text:</h3>
@@ -98,7 +98,7 @@ const AskAISidebar = ({
       >
         {chatHistory.length === 0 ? (
           <div className="text-center text-gray-500 mt-8">
-            <p>Ask a question about the selected text</p>
+            <p>{highlightedText ? 'Ask a question about the selected text' : 'Ask a question about your document'}</p>
           </div>
         ) : (
           chatHistory.map((message, index) => (
