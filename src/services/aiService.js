@@ -75,10 +75,10 @@ export const rewriteText = async (text, style = 'formal') => {
       }
     }
 
-    return `Text: ${text}\n\nRewrite: ${rewrittenText.trim()}`;
+    return rewrittenText.trim();
   } catch (error) {
     console.error('Error rewriting text:', error);
-    return `Text: ${text}\n\nRewrite: Error: ${error.message}`;
+    throw new Error(`Failed to rewrite text: ${error.message}`);
   }
 };
 

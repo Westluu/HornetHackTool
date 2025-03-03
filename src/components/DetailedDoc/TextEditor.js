@@ -14,6 +14,7 @@ import SelectionToolbar from './SelectionToolbar';
 import AIAnswerModal from './AIAnswerModal';
 import AskAISidebar from './AskAISidebar';
 import AskAIButton from './AskAIButton';
+import InlineRewriteControl from './InlineRewriteControl';
 
 // Simple component for displaying chemical structure images
 const ImageBlock = (props) => {
@@ -58,6 +59,7 @@ const TextEditor = () => {
   const [askingQuestion, setAskingQuestion] = useState(false);
   const [showAskAISidebar, setShowAskAISidebar] = useState(false);
   const [selectedTextForAI, setSelectedTextForAI] = useState('');
+  const [inlineRewriteState, setInlineRewriteState] = useState(null);
 
   const customBlockRenderer = (block) => {
     console.log('TextEditor: customBlockRenderer called for block:', block.getKey(), 'type:', block.getType());
@@ -1099,33 +1101,32 @@ const TextEditor = () => {
 
       if (!selectedText) return;
 
-
       const rewrittenText = await rewriteText(selectedText, style);
       
       if (rewrittenText && rewrittenText !== selectedText) {
-        const newContentState = Modifier.replaceText(
-          contentState,
-          selection,
-          rewrittenText
-        );
-
-      const newEditorState = EditorState.push(
-        editorState,
-        newContentState,
-        'insert-characters'
-      );
-      
-        handleEditorStateChange(newEditorState);
+        console.log('Preparing inline rewrite');
+        
+        // Save the selection information for later use when accepting/rejecting
+        const inlineRewriteData = {
+          originalText: selectedText,
+          rewrittenText: rewrittenText,
+          selectionStart: selection.getStartOffset(),
+          selectionEnd: selection.getEndOffset(),
+          blockKey: selection.getStartKey(),
+          timestamp: Date.now()
+        };
+        
+        console.log('Setting inline rewrite state:', inlineRewriteData);
+        setInlineRewriteState(inlineRewriteData);
+        
+        // Hide the toolbar
+        setToolbarPosition(null);
       }
     } catch (error) {
       console.error('Rewrite error:', error);
       setError(error.message || 'Failed to rewrite text');
     } finally {
       setLoading(false);
-      // Only hide toolbar if no error
-      if (!error) {
-        setToolbarPosition(null);
-      }
     }
   };
 
@@ -1224,6 +1225,67 @@ const TextEditor = () => {
     } catch (error) {
       console.error('Error inserting AI answer:', error);
       setError('Failed to insert AI answer into document');
+    }
+  };
+
+
+  // Function to handle accepting the inline rewrite
+  const handleAcceptRewrite = () => {
+    try {
+      console.log('Accepting inline rewrite');
+      if (!inlineRewriteState) return;
+      
+      const { blockKey, selectionStart, selectionEnd, rewrittenText } = inlineRewriteState;
+      const contentState = editorState.getCurrentContent();
+      
+      // Create a selection that covers the original text
+      const rewriteSelection = SelectionState.createEmpty(blockKey).merge({
+        anchorOffset: selectionStart,
+        focusOffset: selectionEnd,
+        isBackward: false
+      });
+      
+      // Replace the original text with the rewritten text
+      const contentStateWithRewrite = Modifier.replaceText(
+        contentState,
+        rewriteSelection,
+        rewrittenText
+      );
+      
+      // Create a new editor state with the rewritten text
+      const newEditorState = EditorState.push(
+        editorState,
+        contentStateWithRewrite,
+        'insert-characters'
+      );
+      
+      // Update the editor state
+      handleEditorStateChange(newEditorState);
+      
+      // Clear the inline rewrite state
+      setInlineRewriteState(null);
+      
+      // Save the document with the changes
+      saveDocument(newEditorState);
+    } catch (error) {
+      console.error('Error accepting rewrite:', error);
+      setError('Failed to apply rewrite');
+      setInlineRewriteState(null);
+    }
+  };
+  
+  // Function to handle rejecting the inline rewrite
+  const handleRejectRewrite = () => {
+    try {
+      console.log('Rejecting inline rewrite');
+      if (!inlineRewriteState) return;
+      
+      // Simply clear the inline rewrite state to dismiss the suggestion
+      setInlineRewriteState(null);
+    } catch (error) {
+      console.error('Error rejecting rewrite:', error);
+      setError('Failed to reject rewrite');
+      setInlineRewriteState(null);
     }
   };
 
@@ -1683,6 +1745,13 @@ const TextEditor = () => {
             <PhysicsDiagramButton key="physics-diagram-button" />
           ]}
           blockRendererFn={customBlockRenderer}
+          customStyleMap={{
+            'REWRITTEN': {
+              backgroundColor: 'rgba(173, 216, 230, 0.2)',
+              padding: '2px 0',
+              borderBottom: '1px solid #add8e6'
+            }
+          }}
           onBlur={() => console.log('Editor blur event')}
           onFocus={() => console.log('Editor focus event')}
         />
@@ -1723,6 +1792,18 @@ const TextEditor = () => {
           onSubmitQuestion={handleAskQuestion}
           onInsertAnswer={handleInsertAnswer}
         />
+
+        {/* Inline Rewrite Control */}
+        {inlineRewriteState && (
+          <div className="inline-rewrite-container fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl">
+            <InlineRewriteControl
+              originalText={inlineRewriteState.originalText}
+              rewrittenText={inlineRewriteState.rewrittenText}
+              onAccept={handleAcceptRewrite}
+              onReject={handleRejectRewrite}
+            />
+          </div>
+        )}
 
         {/* Graph handling */}
         {Object.entries(graphBlocks).map(([blockKey, graphData]) => (
