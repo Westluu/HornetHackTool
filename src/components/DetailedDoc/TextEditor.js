@@ -1738,6 +1738,11 @@ const TextEditor = () => {
     }
   };
 
+  // Calculate the editor container class based on whether the sidebar is open
+  const editorContainerClass = showAskAISidebar
+    ? 'bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen transition-all duration-300 ease-in-out mr-96'
+    : 'bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen transition-all duration-300 ease-in-out';
+
   return (
     <div className='bg-[#F8F9FA] min-h-screen pb-16 relative'>
 
@@ -1747,7 +1752,7 @@ const TextEditor = () => {
           editorState={editorState}
           onEditorStateChange={handleEditorStateChange}
           toolbarClassName='sticky top-0 z-50 !justify-center'
-          editorClassName='bg-white mt-6 shadow-lg w-3/4 lg:w-3/5 mx-auto p-10 border mb-10 min-h-screen'
+          editorClassName={editorContainerClass}
           toolbarCustomButtons={[
             <AIButton key="ai-button" />, 
             <button key="diagram-button" onClick={handleGraphClick}>Graph</button>,

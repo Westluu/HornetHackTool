@@ -69,7 +69,15 @@ const AskAISidebar = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed top-0 right-0 h-full w-96 bg-white shadow-lg z-[9000] flex flex-col">
+    <>
+      {/* Overlay to darken the main content when sidebar is open */}
+      <div 
+        className="fixed inset-0 bg-black bg-opacity-10 z-[8999]"
+        onClick={onClose}
+      />
+      
+      {/* Main sidebar container positioned to the right of the paper */}
+      <div className="fixed top-0 right-0 h-full w-96 bg-white shadow-lg z-[9000] flex flex-col transition-all duration-300 ease-in-out">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-blue-600 text-white">
         <h2 className="text-xl font-bold">Ask AI</h2>
@@ -175,6 +183,7 @@ const AskAISidebar = ({
         </form>
       </div>
     </div>
+    </>
   );
 };
 
