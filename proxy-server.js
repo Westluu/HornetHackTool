@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 const fetch = require('node-fetch');
+const FormData = require('form-data');
 
 // PubChem API base URL
 const PUBCHEM_BASE_URL = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
@@ -178,7 +179,6 @@ app.get('/api/pubchem/compound/cid/:cid/record/PNG', async (req, res) => {
 });
 
 // We're now handling SDF data in the general PubChem endpoint
-
 // Proxy PubChem API requests - fallback for other endpoints
 app.get('/api/pubchem/*', async (req, res) => {
   try {
@@ -891,6 +891,268 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+// Podcast generation endpoint
+app.post('/api/generate-podcast', async (req, res) => {
+  try {
+    console.log('\n=== Podcast Generation Request ===')
+    console.log('Request body:', req.body);
+    
+    const { text, options } = req.body;
+    
+    if (!text) {
+      console.log('Error: No text provided');
+      return res.status(400).json({ error: 'Text is required' });
+    }
+    
+    // Import Gradio client
+    const { Client } = await import('@gradio/client');
+    
+    // Connect to the Hugging Face Space with token
+    console.log('Connecting to Hugging Face Space...');
+    console.log('Using Hugging Face token:', process.env.REACT_APP_HUGGING_FACE_TOKEN ? 'Present' : 'Missing');
+    
+    const client = await Client.connect("Bootcampwluu/Podcastfy.ai_demo", {
+      hf_token: process.env.REACT_APP_HUGGING_FACE_TOKEN
+    });
+    console.log('Connected to Hugging Face Space');
+    
+    // Check if Gemini API key is available
+    if (!process.env.REACT_APP_GEMINI_API_KEY) {
+      console.error('Gemini API key is required');
+      return res.status(400).json({
+        error: 'Missing API Key',
+        details: 'Gemini API key is required for podcast generation. Please add your Gemini API key to the .env file.'
+      });
+    }
+    
+    // Extract options with defaults
+    const podcastName = options?.podcastName || 'Generated Podcast';
+    const podcastTagline = options?.podcastTagline || 'An AI-generated podcast';
+    const wordCount = options?.wordCount || 500;
+    const conversationStyle = options?.conversationStyle || 'Casual';
+    const roles = options?.roles || 'Host and Guest';
+    const rolesParts = roles.split(' and ');
+    const rolesPerson1 = rolesParts[0] || 'Host';
+    const rolesPerson2 = rolesParts[1] || 'Guest';
+    const dialogueStructure = options?.dialogueStructure || 'Conversational';
+    // Force TTS model to 'edge' which only requires Gemini API key
+    const ttsModel = 'edge';
+    const creativityLevel = options?.creativityLevel || 0.7;
+    const userInstructions = options?.userInstructions || '';
+    
+    // Log the options being used
+    console.log('Generating podcast with options:', {
+      podcastName,
+      podcastTagline,
+      wordCount,
+      conversationStyle,
+      rolesPerson1,
+      rolesPerson2,
+      dialogueStructure,
+      ttsModel,
+      creativityLevel,
+      userInstructions
+    });
+    
+    // Submit the job to the Gradio app using the predict method
+    try {
+      const result = await client.predict("/process_inputs", { 
+        text_input: text, 
+        urls_input: "", 
+        pdf_files: null, 
+        image_files: null, 
+        gemini_key: process.env.REACT_APP_GEMINI_API_KEY, 
+        openai_key: "", // Not using OpenAI TTS
+        elevenlabs_key: "", // Not using ElevenLabs TTS
+        word_count: wordCount, 
+        conversation_style: conversationStyle, 
+        roles_person1: rolesPerson1, 
+        roles_person2: rolesPerson2, 
+        dialogue_structure: dialogueStructure, 
+        podcast_name: podcastName, 
+        podcast_tagline: podcastTagline, 
+        tts_model: ttsModel, // Already set to 'openai' above
+        creativity_level: creativityLevel, 
+        user_instructions: userInstructions
+      });
+      
+      console.log('Podcast generation job submitted');
+      console.log('Result:', result);
+      
+      // Check if the result contains an error message
+      const resultStr = JSON.stringify(result);
+      
+      // Check for unusual activity error
+      if (resultStr.includes('detected_unusual_activity') || resultStr.includes('Unusual activity detected')) {
+        console.error('Hugging Face Space detected unusual activity');
+        return res.status(403).json({
+          error: 'Hugging Face Space Error',
+          details: 'The Hugging Face Space has detected unusual activity and has disabled free tier usage. This may be due to high usage or IP restrictions. You may need to use a different Hugging Face account or wait before trying again.'
+        });
+      }
+      
+      // Check for API key errors
+      if (resultStr.includes('API key is required') || resultStr.includes('API key')) {
+        console.error('API key error detected in response:', resultStr);
+        
+        // Determine which API key is missing
+        let errorMessage = 'Missing API key';
+        if (resultStr.includes('OpenAI API key')) {
+          errorMessage = 'OpenAI API key is required when using the OpenAI TTS model';
+        } else if (resultStr.includes('ElevenLabs API key')) {
+          errorMessage = 'ElevenLabs API key is required when using the ElevenLabs TTS model';
+        }
+        
+        // Return error with specific message
+        return res.status(400).json({
+          error: 'Missing API Key',
+          details: `${errorMessage}. Please add the required API key to your .env file.`
+        });
+      }
+      
+      // Check if the result already contains the audio URL
+      let audioUrl = '';
+      
+      console.log('Checking for immediate audio URL in result:', JSON.stringify(result, null, 2));
+      
+      if (result && result.data && result.data.length > 0) {
+        // Check if the URL is in the first item's url property
+        if (result.data[0] && result.data[0].url) {
+          audioUrl = result.data[0].url;
+          console.log('Found immediate audio URL in result.data[0].url:', audioUrl);
+        } else if (typeof result.data[0] === 'string' && result.data[0].includes('http')) {
+          // Sometimes the URL might be directly in the data array as a string
+          audioUrl = result.data[0];
+          console.log('Found immediate audio URL in result.data[0] as string:', audioUrl);
+        }
+      }
+      
+      if (audioUrl) {
+        // If we have an audio URL, return it immediately with COMPLETE status
+        console.log('Returning immediate COMPLETE status with audio URL');
+        res.json({
+          taskId: result.task_id || result.id,
+          status: 'COMPLETE',
+          audioUrl: audioUrl,
+          transcript: 'Podcast transcript will be available soon.',
+          message: 'Podcast generation completed'
+        });
+      } else {
+        // Otherwise return the job ID and initial status for polling
+        console.log('No immediate audio URL found, returning PENDING status for polling');
+        res.json({
+          taskId: result.task_id || result.id,
+          status: 'PENDING',
+          message: 'Podcast generation started'
+        });
+      }
+    } catch (predictionError) {
+      console.error('Error during prediction:', predictionError);
+      
+      // Check if the error message contains information about unusual activity
+      const errorStr = predictionError.toString();
+      if (errorStr.includes('detected_unusual_activity') || errorStr.includes('Unusual activity detected')) {
+        return res.status(403).json({
+          error: 'Hugging Face Space Error',
+          details: 'The Hugging Face Space has detected unusual activity and has disabled free tier usage. This may be due to high usage or IP restrictions. You may need to use a different Hugging Face account or wait before trying again.'
+        });
+      }
+      
+      throw predictionError; // Re-throw for the outer catch block to handle
+    }
+  } catch (error) {
+    console.error('Error generating podcast:', error);
+    res.status(500).json({ error: 'Failed to generate podcast', details: error.message });
+  }
+});
+
+// Check podcast status endpoint
+app.get('/api/podcast-status/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    console.log('\n=== Checking Podcast Status ===')
+    console.log('Task ID:', taskId);
+    
+    // Import Gradio client
+    const { Client } = await import('@gradio/client');
+    
+    // Connect to the Hugging Face Space with token
+    console.log('Connecting to Hugging Face Space...');
+    console.log('Using Hugging Face token:', process.env.REACT_APP_HUGGING_FACE_TOKEN ? 'Present' : 'Missing');
+    
+    const client = await Client.connect("Bootcampwluu/Podcastfy.ai_demo", {
+      hf_token: process.env.REACT_APP_HUGGING_FACE_TOKEN
+    });
+    console.log('Connected to Hugging Face Space');
+    
+    // Get the status of the task
+    const status = await client.status(taskId);
+    console.log('Podcast status result:', status);
+    
+    // If the task is completed, get the outputs
+    if (status.status === 'COMPLETED') {
+      try {
+        const outputs = await client.result(taskId);
+        console.log('Podcast outputs:', outputs);
+        
+        // Extract the relevant data from outputs
+        // The structure may vary based on the actual Gradio app output format
+        let audioUrl = '';
+        let transcript = '';
+        
+        console.log('Detailed outputs:', JSON.stringify(outputs, null, 2));
+        
+        if (outputs && outputs.data && outputs.data.length > 0) {
+          // Based on the response we received, the audio file is in the first item's url property
+          if (outputs.data[0] && outputs.data[0].url) {
+            audioUrl = outputs.data[0].url;
+            console.log('Extracted audio URL:', audioUrl);
+          } else if (typeof outputs.data[0] === 'string' && outputs.data[0].includes('http')) {
+            // Sometimes the URL might be directly in the data array as a string
+            audioUrl = outputs.data[0];
+            console.log('Extracted audio URL from string:', audioUrl);
+          }
+          
+          // For now, we don't have a transcript in the response, so we'll generate a simple one
+          transcript = 'Podcast transcript will be available soon.';
+        }
+        
+        // If we still don't have an audio URL, check if the entire outputs object has a direct URL
+        if (!audioUrl && outputs && outputs.url) {
+          audioUrl = outputs.url;
+          console.log('Extracted audio URL from outputs object:', audioUrl);
+        }
+        
+        res.json({
+          status: 'COMPLETE',
+          audioUrl,
+          transcript
+        });
+      } catch (outputError) {
+        console.error('Error getting outputs:', outputError);
+        res.json({
+          status: 'COMPLETE',
+          error: 'Could not retrieve podcast outputs'
+        });
+      }
+    } else if (status.status === 'FAILED') {
+      res.json({
+        status: 'ERROR',
+        error: status.error || 'Podcast generation failed'
+      });
+    } else {
+      // Task is still in progress
+      res.json({
+        status: 'PROCESSING',
+        progress: status.progress || 0
+      });
+    }
+  } catch (error) {
+    console.error('Error checking podcast status:', error);
+    res.status(500).json({ error: 'Failed to check podcast status', details: error.message });
+  }
+});
+
 // Add a new endpoint for handling AI questions about document content
 app.post('/api/ask-question', async (req, res) => {
   try {
@@ -980,3 +1242,5 @@ app.listen(3001, () => {
   console.log('Port: 3001');
   console.log('Environment:', process.env.NODE_ENV);
 });
+
+
