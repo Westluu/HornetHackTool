@@ -6,6 +6,7 @@ import { useParams } from 'react-router-dom';
 import { getDocument, saveDocument } from '../../services/localStorageService';
 import { rewriteText, askQuestionAboutContent } from '../../services/aiService';
 import { generateChemicalStructure, generatePhysicsDiagram, generate3DChemicalStructure } from '../../services/scienceService';
+import { generatePodcast, pollPodcastStatus } from '../../services/podcastService';
 import GraphBlock from './GraphBlock';
 import CanvasBlock from './CanvasBlock';
 import TestBlock from './TestBlock';
@@ -15,6 +16,8 @@ import AIAnswerModal from './AIAnswerModal';
 import AskAISidebar from './AskAISidebar';
 import AskAIButton from './AskAIButton';
 import InlineRewriteControl from './InlineRewriteControl';
+import PodcastButton from './PodcastButton';
+import PodcastModal from './PodcastModal';
 
 // Simple component for displaying chemical structure images
 const ImageBlock = (props) => {
@@ -60,6 +63,25 @@ const TextEditor = () => {
   const [showAskAISidebar, setShowAskAISidebar] = useState(false);
   const [selectedTextForAI, setSelectedTextForAI] = useState('');
   const [inlineRewriteState, setInlineRewriteState] = useState(null);
+  
+  // Podcast state
+  const [isPodcastModalOpen, setIsPodcastModalOpen] = useState(false);
+  const [podcastStatus, setPodcastStatus] = useState('idle'); // idle, generating, complete, error
+  const [podcastProgress, setPodcastProgress] = useState(0);
+  const [podcastAudioUrl, setPodcastAudioUrl] = useState(null);
+  const [podcastTranscript, setPodcastTranscript] = useState(null);
+  const [podcastOptions, setPodcastOptions] = useState({
+    podcastName: 'Generated Podcast',
+    podcastTagline: 'An AI-generated podcast based on your document',
+    wordCount: 500,
+    conversationStyle: 'Casual',
+    rolesPerson1: 'Host',
+    rolesPerson2: 'Guest',
+    dialogueStructure: 'Conversational',
+    ttsModel: 'openai', // Using openai as the default TTS model
+    creativityLevel: 0.7,
+    userInstructions: ''
+  });
 
   const customBlockRenderer = (block) => {
     console.log('TextEditor: customBlockRenderer called for block:', block.getKey(), 'type:', block.getType());
@@ -1303,6 +1325,103 @@ const TextEditor = () => {
     setAIAnswer(null);
   };
 
+  // Handle podcast generation
+  const handleGeneratePodcast = async () => {
+    try {
+      // Get the current content
+      const contentState = editorState.getCurrentContent();
+      const text = contentState.getPlainText();
+      
+      if (!text) {
+        alert('Document is empty. Please add some content before generating a podcast.');
+        return;
+      }
+      
+      // Update status
+      setPodcastStatus('generating');
+      setPodcastProgress(0);
+      
+      // Generate podcast
+      const result = await generatePodcast(text, podcastOptions);
+      console.log('Podcast generation result:', result);
+      
+      // Check for immediate errors (like Hugging Face unusual activity)
+      if (result.status === 'ERROR') {
+        console.error('Immediate error in podcast generation:', result.error);
+        setPodcastStatus('error');
+        setPodcastTranscript(result.error + ': ' + result.message);
+        return;
+      }
+      
+      // Check if the podcast is already complete (immediate completion)
+      if (result.status === 'COMPLETE' && result.audioUrl) {
+        console.log('Podcast completed immediately with URL:', result.audioUrl);
+        setPodcastStatus('complete');
+        setPodcastProgress(100);
+        setPodcastAudioUrl(result.audioUrl);
+        
+        if (result.transcript) {
+          setPodcastTranscript(result.transcript);
+        }
+        return;
+      }
+      
+      // Start polling for status if not immediately complete
+      if (result && result.taskId) {
+        pollPodcastStatus(
+          result.taskId,
+          (status) => {
+            console.log('Podcast status update:', status);
+            
+            // Update progress
+            if (status.status === 'PROCESSING') {
+              const progress = status.progress || 0;
+              setPodcastProgress(progress * 100);
+            } else if (status.status === 'COMPLETE') {
+              setPodcastStatus('complete');
+              setPodcastProgress(100);
+              
+              // Set audio URL and transcript
+              if (status.audioUrl) {
+                setPodcastAudioUrl(status.audioUrl);
+              }
+              
+              if (status.transcript) {
+                setPodcastTranscript(status.transcript);
+              }
+            } else if (status.status === 'ERROR') {
+              setPodcastStatus('error');
+              setError(status.error || 'An error occurred during podcast generation');
+            }
+          },
+          5000, // Poll every 5 seconds
+          600000 // Timeout after 10 minutes
+        ).catch(error => {
+          console.error('Podcast polling error:', error);
+          setPodcastStatus('error');
+          setError(error.message);
+        });
+      }
+    } catch (error) {
+      console.error('Error generating podcast:', error);
+      setPodcastStatus('error');
+      setError(error.message);
+    }
+  };
+  
+  // Toggle podcast modal
+  const togglePodcastModal = () => {
+    setIsPodcastModalOpen(!isPodcastModalOpen);
+    
+    // Reset state when closing
+    if (isPodcastModalOpen) {
+      setPodcastStatus('idle');
+      setPodcastProgress(0);
+      setPodcastAudioUrl(null);
+      setPodcastTranscript(null);
+    }
+  };
+
   //AI Button Component
   const AIButton = () => (
     <button
@@ -1818,6 +1937,22 @@ const TextEditor = () => {
             />
           </div>
         )}
+        
+        {/* Podcast Button */}
+        <PodcastButton onClick={togglePodcastModal} />
+        
+        {/* Podcast Modal */}
+        <PodcastModal
+          isOpen={isPodcastModalOpen}
+          onClose={togglePodcastModal}
+          status={podcastStatus}
+          progress={podcastProgress}
+          audioUrl={podcastAudioUrl}
+          transcript={podcastTranscript}
+          onGeneratePodcast={handleGeneratePodcast}
+          options={podcastOptions}
+          onOptionsChange={setPodcastOptions}
+        />
 
         {/* Graph handling */}
         {Object.entries(graphBlocks).map(([blockKey, graphData]) => (
