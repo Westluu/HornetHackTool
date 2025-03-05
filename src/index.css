@@ -31,6 +31,18 @@
   cursor: text !important;
 }
 
+/* Loading spinner animation */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes loading-bar {
+  0% { width: 0%; }
+  50% { width: 100%; }
+  100% { width: 0%; }
+}
+
 /* Special area below 3D diagrams */
 .below-3d-diagram-area {
   position: relative;

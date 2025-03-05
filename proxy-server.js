@@ -236,6 +236,7 @@ app.get('/api/pubchem/*', async (req, res) => {
 
 // Endpoint to generate drawing scripts for physics diagrams
 app.post('/api/generate-drawing-script', async (req, res) => {
+  console.log('\n=== Drawing Script Generation Request ===');
   try {
     console.log('\n=== Drawing Script Generation Request ===');
     console.log('Request body:', req.body);
@@ -357,29 +358,43 @@ function draw[DiagramType]Diagram(canvas) {
       console.log(scriptContent);
       console.log('\n=== END OF RAW LLM RESPONSE ===');
       
-      // Clean up the script (remove markdown code blocks if present)
+      // Clean up the script (remove markdown code blocks, <think> tags, and other non-JavaScript content)
       let cleanScript = scriptContent;
       
+      // Remove <think> and </think> tags and any content between them
+      if (scriptContent.includes('</think>')) {
+        console.log('Detected </think> tags in response, cleaning up...');
+        // Remove any content that appears after a </think> tag
+        const thinkParts = scriptContent.split('</think>');
+        if (thinkParts.length > 1) {
+          // Take the last part after all </think> tags
+          cleanScript = thinkParts[thinkParts.length - 1].trim();
+          console.log('Removed content enclosed in </think> tags');
+        }
+      }
+      
       // Check for markdown code blocks
-      if (scriptContent.includes('```javascript')) {
+      if (cleanScript.includes('```javascript')) {
         const codeBlockRegex = /```javascript\n([\s\S]*?)```/;
-        const match = scriptContent.match(codeBlockRegex);
+        const match = cleanScript.match(codeBlockRegex);
         
         if (match && match[1]) {
           cleanScript = match[1].trim();
           console.log('Extracted JavaScript code from markdown code block');
         }
-      } else if (scriptContent.includes('```js')) {
+      } else if (cleanScript.includes('```js')) {
+        console.log('Found ```js code block...');
         const codeBlockRegex = /```js\n([\s\S]*?)```/;
-        const match = scriptContent.match(codeBlockRegex);
+        const match = cleanScript.match(codeBlockRegex);
         
         if (match && match[1]) {
           cleanScript = match[1].trim();
           console.log('Extracted JavaScript code from js markdown code block');
         }
-      } else if (scriptContent.includes('```')) {
+      } else if (cleanScript.includes('```')) {
+        console.log('Found generic ``` code block...');
         const codeBlockRegex = /```\n([\s\S]*?)```/;
-        const match = scriptContent.match(codeBlockRegex);
+        const match = cleanScript.match(codeBlockRegex);
         
         if (match && match[1]) {
           cleanScript = match[1].trim();
@@ -388,9 +403,9 @@ function draw[DiagramType]Diagram(canvas) {
       }
       
       // If we couldn't extract from code blocks but can identify a function declaration
-      if (cleanScript === scriptContent && scriptContent.includes('function draw')) {
+      if (cleanScript.includes('function draw')) {
         const functionRegex = /(function\s+draw[\w]*\s*\([^)]*\)[\s\S]*)/;
-        const match = scriptContent.match(functionRegex);
+        const match = cleanScript.match(functionRegex);
         
         if (match && match[1]) {
           cleanScript = match[1].trim();
@@ -399,6 +414,7 @@ function draw[DiagramType]Diagram(canvas) {
       }
       
       // Additional safety check - ensure the script starts with a function declaration
+      console.log('Performing final validation on script...');
       if (!cleanScript.trim().startsWith('function')) {
         console.log('Script does not start with a function declaration, attempting to fix');
         const functionRegex = /(function\s+draw[\w]*\s*\([^)]*\)[\s\S]*)/;
@@ -408,17 +424,80 @@ function draw[DiagramType]Diagram(canvas) {
           cleanScript = match[1].trim();
           console.log('Fixed script to start with function declaration');
         } else {
-          // If we can't find a function declaration, use the fallback script
-          console.log('Could not find function declaration, using fallback script');
-          throw new Error('Invalid script format - no function declaration found');
+          // Look for any function declaration if we can't find one starting with 'draw'
+          const anyFunctionRegex = /(function\s+[\w]+\s*\([^)]*\)[\s\S]*)/;
+          const anyFunctionMatch = cleanScript.match(anyFunctionRegex);
+          
+          if (anyFunctionMatch && anyFunctionMatch[1]) {
+            cleanScript = anyFunctionMatch[1].trim();
+            console.log('Found alternative function declaration');
+            
+            // Rename the function to match our expected format
+            const functionNameRegex = /function\s+([\w]+)\s*\(/;
+            const functionNameMatch = cleanScript.match(functionNameRegex);
+            
+            if (functionNameMatch && functionNameMatch[1]) {
+              const oldFunctionName = functionNameMatch[1];
+              const newFunctionName = `draw${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)}Diagram`;
+              
+              cleanScript = cleanScript.replace(
+                `function ${oldFunctionName}(`, 
+                `function ${newFunctionName}(`
+              );
+              
+              console.log(`Renamed function from ${oldFunctionName} to ${newFunctionName}`);
+            }
+          } else {
+            // If we can't find any function declaration, use the fallback script
+            console.log('Could not find any function declaration, using fallback script');
+            throw new Error('Invalid script format - no function declaration found');
+          }
         }
+      }
+      
+      // Ensure the script has the correct function name format
+      const expectedFunctionName = `draw${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)}Diagram`;
+      console.log('Expected function name:', expectedFunctionName);
+      
+      // Check if the expected function name exists in the script
+      if (!cleanScript.includes(expectedFunctionName)) {
+        console.log('Script does not contain the expected function name, attempting to fix...');
+        
+        // Find any function name in the script
+        const functionNameRegex = /function\s+([\w]+)\s*\(/;
+        const functionNameMatch = cleanScript.match(functionNameRegex);
+        
+        if (functionNameMatch && functionNameMatch[1]) {
+          const actualFunctionName = functionNameMatch[1];
+          console.log(`Found function name '${actualFunctionName}', renaming to '${expectedFunctionName}'`);
+          
+          // Replace all occurrences of the function name
+          cleanScript = cleanScript.replace(
+            new RegExp(`function\\s+${actualFunctionName}\\s*\\(`, 'g'),
+            `function ${expectedFunctionName}(`
+          );
+          
+          // Also replace any self-references within the function
+          cleanScript = cleanScript.replace(
+            new RegExp(`\\b${actualFunctionName}\\b`, 'g'),
+            expectedFunctionName
+          );
+          
+          console.log('Function renamed successfully');
+        } else {
+          console.warn('Could not find any function name to rename');
+        }
+      } else {
+        console.log(`Script already contains the expected function name '${expectedFunctionName}'`);
       }
       
       console.log('Generated script length:', cleanScript.length);
       
       // Log the first 200 characters of the script for debugging
       console.log('Script preview:', cleanScript.substring(0, 200) + '...');
+      console.log('Script contains expected function name:', cleanScript.includes(expectedFunctionName) ? 'Yes' : 'No');
       
+      console.log('Sending successful response with script');
       res.json({ script: cleanScript });
       console.log('Response sent successfully');
     } catch (aiError) {
@@ -762,6 +841,8 @@ function draw[DiagramType]Diagram(canvas) {
     }
   } catch (error) {
     console.error('Error generating drawing script:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', JSON.stringify(error, null, 2));
     res.status(500).json({ error: 'Failed to generate drawing script', details: error.message });
   }
 });
@@ -786,7 +867,55 @@ app.post('/api/analyze-physics', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: 'You are a physics expert. Analyze the given physics problem and extract key information. Return ONLY a JSON object with the following fields: problemType (string), objects (array), forces (array), velocities (array), accelerations (array), components (array), and environment (object).'
+            content: `You are a physics expert. Analyze the given physics problem and extract key information for creating a diagram. 
+
+Return ONLY a JSON object with the following fields:
+- problemType (string): The type of physics problem (e.g., 'force', 'kinematics', 'circuit', etc.)
+- objects (array): List of objects in the problem, each with properties:
+  * id (string): Unique identifier for the object
+  * name (string): Name of the object
+  * type (string): Type of object (e.g., 'block', 'car', 'resistor', etc.)
+  * position (object): {x, y} coordinates (normalized from 0 to 1)
+  * width (number): Width of the object (normalized from 0 to 1)
+  * height (number): Height of the object (normalized from 0 to 1)
+  * angle (number): Rotation angle in degrees
+  * mass (number, optional): Mass of the object if relevant
+  * charge (number, optional): Charge of the object if relevant
+  * resistance (number, optional): Resistance of the object if relevant
+- forces (array): List of forces, each with properties:
+  * id (string): Unique identifier for the force
+  * name (string): Name of the force (e.g., 'gravity', 'normal', 'friction', etc.)
+  * type (string): Type of force (e.g., 'contact', 'field', etc.)
+  * sourceId (string): ID of the object applying the force
+  * targetId (string): ID of the object receiving the force
+  * magnitude (number): Magnitude of the force
+  * angle (number): Direction angle in degrees
+  * components (object, optional): {x, y} components of the force
+- velocities (array): List of velocities, each with properties:
+  * objectId (string): ID of the object with this velocity
+  * magnitude (number): Magnitude of the velocity
+  * angle (number): Direction angle in degrees
+  * components (object, optional): {x, y} components of the velocity
+- accelerations (array): List of accelerations, each with properties:
+  * objectId (string): ID of the object with this acceleration
+  * magnitude (number): Magnitude of the acceleration
+  * angle (number): Direction angle in degrees
+  * components (object, optional): {x, y} components of the acceleration
+- components (array): List of electrical components (for circuit problems), each with properties:
+  * id (string): Unique identifier for the component
+  * type (string): Type of component (e.g., 'resistor', 'battery', 'capacitor', etc.)
+  * value (number): Value of the component (e.g., resistance in ohms)
+  * position (object): {x, y} coordinates (normalized from 0 to 1)
+  * connections (array): List of component IDs this component is connected to
+- environment (object): Environmental factors like:
+  * gravity (number): Gravitational acceleration if relevant
+  * friction (number): Coefficient of friction if relevant
+  * medium (string): Medium in which the problem takes place (e.g., 'air', 'water', etc.)
+  * inclinedPlane (object, optional): {angle, length} if there's an inclined plane
+  * electricField (object, optional): {magnitude, direction} if there's an electric field
+  * magneticField (object, optional): {magnitude, direction} if there's a magnetic field
+
+Ensure all numerical values include their units where appropriate. Make reasonable assumptions for any values not explicitly stated in the problem. The returned JSON must be valid and properly formatted.`
           },
           {
             role: 'user',

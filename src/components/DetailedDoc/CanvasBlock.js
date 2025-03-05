@@ -59,35 +59,131 @@ const CanvasBlock = ({ blockProps }) => {
           
           // Create a function from the script string
           // Handle both regular diagrams and test diagrams
-          const functionName = diagramType === 'test' ? 'drawTestDiagram' : `draw${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)}Diagram`;
+          const expectedFunctionName = diagramType === 'test' ? 'drawTestDiagram' : `draw${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)}Diagram`;
+          
+          // Log the function name we're looking for
+          console.log('CanvasBlock: Looking for function:', expectedFunctionName);
+          
+          // Check if the expected function name is in the script
+          const hasFunctionName = rawScript.includes(expectedFunctionName);
+          console.log('CanvasBlock: Script contains expected function name:', hasFunctionName);
+          
+          // Try to extract any function name from the script as a fallback
+          let fallbackFunctionName = null;
+          const functionMatch = rawScript.match(/function\s+([\w]+)\s*\(/i);
+          if (functionMatch && functionMatch[1]) {
+            fallbackFunctionName = functionMatch[1];
+            console.log('CanvasBlock: Found fallback function name in script:', fallbackFunctionName);
+          }
+          
+          // Use the expected function name if it exists in the script, otherwise use the fallback
+          const functionName = hasFunctionName ? expectedFunctionName : fallbackFunctionName;
           
           // Create a safe execution environment
-          const scriptToExecute = `
-            // Ensure we have a clean execution environment
-            'use strict';
-            
-            // The actual drawing script
-            ${rawScript}
-            
-            // Execute the drawing function
-            if (typeof ${functionName} === 'function') {
-              ${functionName}(canvas);
-              return true;
-            } else {
-              console.error('Drawing function not found in script');
-              return false;
-            }
-          `;
+          let scriptToExecute;
+          
+          if (functionName) {
+            // If we found a specific function name to call
+            scriptToExecute = `
+              // Ensure we have a clean execution environment
+              'use strict';
+              
+              // The actual drawing script
+              ${rawScript}
+              
+              // Execute the drawing function
+              if (typeof ${functionName} === 'function') {
+                console.log('Executing function: ${functionName}');
+                ${functionName}(canvas);
+                return true;
+              } else {
+                console.error('Drawing function ${functionName} not found in script');
+                return false;
+              }
+            `;
+          } else {
+            // If we couldn't find any function name, try to execute the first function we find
+            scriptToExecute = `
+              // Ensure we have a clean execution environment
+              'use strict';
+              
+              // The actual drawing script
+              ${rawScript}
+              
+              // Try to find and execute any drawing function
+              const functionNames = Object.keys(window).filter(key => 
+                typeof window[key] === 'function' && 
+                (key.startsWith('draw') || key.includes('Diagram'))
+              );
+              
+              if (functionNames.length > 0) {
+                console.log('Found functions:', functionNames);
+                window[functionNames[0]](canvas);
+                return true;
+              } else {
+                // Last resort - try to execute the script directly with the canvas
+                try {
+                  // Create a function with the raw script and canvas as parameter
+                  // eslint-disable-next-line no-new-func
+                  const directExecute = new Function('canvas', rawScript);
+                  directExecute(canvas);
+                  return true;
+                } catch (directError) {
+                  console.error('Direct execution failed:', directError);
+                  return false;
+                }
+              }
+            `;
+          }
           
           // Execute the script - using Function constructor is necessary here for dynamic code execution
           console.log('CanvasBlock: Creating function with script');
+          console.log('CanvasBlock: Script to execute (first 200 chars):', scriptToExecute.substring(0, 200) + '...');
+          
+          // Log the raw script for debugging
+          console.log('CanvasBlock: Raw script (first 200 chars):', rawScript.substring(0, 200) + '...');
+          console.log('CanvasBlock: Raw script contains function declaration:', rawScript.includes('function') ? 'Yes' : 'No');
+          
+          // Extract all function names from the raw script for debugging
+          const functionNameMatches = rawScript.match(/function\s+([\w]+)\s*\(/g) || [];
+          console.log('CanvasBlock: Function declarations found in raw script:', functionNameMatches);
+          
           // eslint-disable-next-line no-new-func
           const drawingFunction = new Function('canvas', scriptToExecute);
           console.log('CanvasBlock: Function created successfully');
           
           console.log('CanvasBlock: Executing drawing function');
-          const result = drawingFunction(canvas);
-          console.log('CanvasBlock: Function execution completed with result:', result);
+          let result;
+          try {
+            result = drawingFunction(canvas);
+            console.log('CanvasBlock: Function execution completed with result:', result);
+          } catch (execError) {
+            console.error('CanvasBlock: Error executing drawing function:', execError);
+            console.error('CanvasBlock: Error message:', execError.message);
+            console.error('CanvasBlock: Error stack:', execError.stack);
+            
+            // Try a direct approach as a last resort
+            console.log('CanvasBlock: Attempting direct script execution as last resort');
+            try {
+              // Create a simple wrapper that just evaluates the script
+              // eslint-disable-next-line no-new-func
+              const directExecute = new Function('canvas', `
+                try {
+                  ${rawScript}
+                  return true;
+                } catch (e) {
+                  console.error('Direct execution error:', e);
+                  return false;
+                }
+              `);
+              
+              result = directExecute(canvas);
+              console.log('CanvasBlock: Direct execution result:', result);
+            } catch (directError) {
+              console.error('CanvasBlock: Direct execution also failed:', directError);
+              result = false;
+            }
+          }
           return result;
         } catch (error) {
           console.error('Error executing drawing script:', error);

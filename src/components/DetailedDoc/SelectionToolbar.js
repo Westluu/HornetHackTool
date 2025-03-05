@@ -1,4 +1,4 @@
-import React, { useState, forwardRef } from 'react';
+import React, { useState, forwardRef, useEffect, useRef } from 'react';
 
 const MODES = {
   TEXT: 'text',
@@ -22,9 +22,31 @@ const STYLES = {
 const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGraph, onScienceDiagram, setDiagramRequestedFromToolbar, onAskAI }, ref) => {
   const [mode, setMode] = useState(MODES.TEXT);
   const [scienceField, setScienceField] = useState(SCIENCE_FIELDS.CHEMISTRY);
+  const [isPhysicsDiagramLoading, setIsPhysicsDiagramLoading] = useState(false);
+  
+  // Create a ref to track if the component is mounted
+  const isMountedRef = useRef(true);
+  
+  // Set up mount/unmount effect
+  useEffect(() => {
+    // Component is mounted
+    isMountedRef.current = true;
+    
+    // Cleanup function that runs when component unmounts
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+  
+  // Safe state setter function
+  const safeSetIsPhysicsDiagramLoading = (value) => {
+    if (isMountedRef.current) {
+      setIsPhysicsDiagramLoading(value);
+    }
+  };
   
   // Debug the current state
-  console.log('Current mode:', mode, 'Current science field:', scienceField);
+  console.log('Current mode:', mode, 'Current science field:', scienceField, 'Physics diagram loading:', isPhysicsDiagramLoading);
 
   // Prevent toolbar from disappearing when clicked
   const handleMouseDown = (e) => {
@@ -260,6 +282,15 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.stopPropagation();
                   console.log('Force diagram button clicked');
                   
+                  // Prevent multiple clicks while loading
+                  if (isPhysicsDiagramLoading) {
+                    console.log('Already generating a physics diagram, ignoring click');
+                    return;
+                  }
+                  
+                  // Set loading state (safely)
+                  safeSetIsPhysicsDiagramLoading(true);
+                  
                   // Clear any flags that might prevent diagram generation
                   window.lastClickFromBelowDiagramArea = false;
                   window.typingBelowDiagram = false;
@@ -275,14 +306,42 @@ const SelectionToolbar = forwardRef(({ onRewrite, position, loading, error, onGr
                   e.fromToolbarButton = true; // Add this flag to explicitly mark it as a toolbar button click
                   
                   // Call the diagram generation function immediately and pass the event
-                  onScienceDiagram('physics', 'force', e);
+                  Promise.resolve(onScienceDiagram('physics', 'force', e))
+                    .then(() => {
+                      console.log('Physics diagram generation completed successfully');
+                    })
+                    .catch((error) => {
+                      console.error('Error in physics diagram generation:', error);
+                      alert('Error creating physics diagram: ' + error.message);
+                    })
+                    .finally(() => {
+                      console.log('Setting physics diagram loading state back to false');
+                      safeSetIsPhysicsDiagramLoading(false);
+                    });
                 }}
-                className="w-full flex flex-col items-start p-3 border-2 border-blue-100 rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer bg-white text-left"
+                disabled={isPhysicsDiagramLoading}
+                className={`w-full flex flex-col items-start p-3 border-2 ${isPhysicsDiagramLoading ? 'border-orange-300 bg-orange-50' : 'border-blue-100 bg-white'} rounded-lg hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-colors ${isPhysicsDiagramLoading ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
                 data-toolbar-button="true"
                 data-diagram-type="force"
               >
-                <span className="font-medium text-gray-800">Force Diagram</span>
-                <span className="text-xs text-gray-500">Create a force diagram</span>
+                <div className="w-full flex justify-between items-center">
+                  <span className="font-medium text-gray-800">Force Diagram</span>
+                  {isPhysicsDiagramLoading && (
+                    <span className="loading-spinner" style={{ 
+                      display: 'inline-block',
+                      width: '16px',
+                      height: '16px',
+                      border: '2px solid rgba(255,255,255,.3)',
+                      borderRadius: '50%',
+                      borderTopColor: '#ff9900',
+                      animation: 'spin 1s linear infinite',
+                      marginLeft: '8px'
+                    }}></span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-500">
+                  {isPhysicsDiagramLoading ? 'Generating diagram...' : 'Create a force diagram'}
+                </span>
               </button>
               <button
                 onClick={(e) => {

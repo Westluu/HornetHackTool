@@ -78,7 +78,7 @@ const TextEditor = () => {
     rolesPerson1: 'Host',
     rolesPerson2: 'Guest',
     dialogueStructure: 'Conversational',
-    ttsModel: 'openai', // Using openai as the default TTS model
+    ttsModel: 'elevenlabs',
     creativityLevel: 0.7,
     userInstructions: ''
   });
@@ -401,13 +401,13 @@ const TextEditor = () => {
       // This prevents diagrams from being generated when clicking in the editor
       if (!isToolbarRequest) {
         console.log('Ignoring diagram generation - not requested from toolbar');
-        return;
+        return Promise.reject(new Error('Diagram generation ignored - not requested from toolbar'));
       }
       
       // Check if we're already generating a diagram to prevent multiple generations
       if (isGeneratingDiagramRef.current) {
         console.log('Diagram generation already in progress, ignoring this request');
-        return;
+        return Promise.reject(new Error('Diagram generation already in progress'));
       }
       
       // Set the flag to indicate we're generating a diagram
@@ -422,7 +422,7 @@ const TextEditor = () => {
       if (timeSinceLastGeneration < 2000) { // 2 seconds debounce
         console.log(`Ignoring diagram generation request - too soon (${timeSinceLastGeneration}ms since last generation)`);
         isGeneratingDiagramRef.current = false; // Reset the flag
-        return;
+        return Promise.reject(new Error(`Diagram generation ignored - too soon (${timeSinceLastGeneration}ms since last generation)`));
       }
       
       // Update the last generation time
@@ -473,6 +473,20 @@ const TextEditor = () => {
       let result;
       console.log('Generating diagram for field:', field, 'type:', type);
       
+      // Set a flag to indicate diagram generation is complete at the end
+      const completeGeneration = () => {
+        console.log('Diagram generation completed, all flags reset');
+        // Clear the timeout to prevent memory leaks
+        if (resetTimeoutRef.current) {
+          clearTimeout(resetTimeoutRef.current);
+          resetTimeoutRef.current = null;
+        }
+        
+        setLoading(false);
+        setIsGeneratingDiagram(false);
+        isGeneratingDiagramRef.current = false;
+      };
+      
       if (field.toLowerCase() === 'chemistry') {
         console.log('Generating chemical structure using PubChem');
         // Check if we need 2D or 3D structure
@@ -486,20 +500,39 @@ const TextEditor = () => {
         }
       } else if (field.toLowerCase() === 'physics') {
         console.log('Generating physics diagram');
-        result = await generatePhysicsDiagram(selectedText, `${type.toUpperCase()}_DIAGRAM`);
+        console.log('Physics diagram type:', type);
+        console.log('Selected text for physics diagram:', selectedText);
+        console.log('Selected text length:', selectedText.length);
+        
+        try {
+          result = await generatePhysicsDiagram(selectedText, `${type.toUpperCase()}_DIAGRAM`);
+          console.log('Physics diagram generation result:', result);
+          console.log('Result type:', result?.type);
+          console.log('Raw script length:', result?.rawScript?.length || 0);
+        } catch (physicsError) {
+          console.error('Error in generatePhysicsDiagram:', physicsError);
+          console.error('Error stack:', physicsError.stack);
+          throw physicsError;
+        }
         
         // Handle canvas-based diagrams differently
         if (result.type === 'canvas') {
           console.log('TextEditor: Handling canvas diagram with result:', result);
+          console.log('Canvas diagram type:', result.diagramType);
+          console.log('Raw script available:', !!result.rawScript);
+          console.log('Script preview:', result.rawScript?.substring(0, 100) + '...');
           
+          console.log('Creating entity for canvas block...');
           const contentStateWithEntity = contentState.createEntity(
             'CANVAS_BLOCK',
             'IMMUTABLE',
             { type: 'canvas', ...result }
           );
+          console.log('Entity created successfully');
           
           const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
           console.log('TextEditor: Created entity with key:', entityKey);
+          console.log('Entity data:', contentStateWithEntity.getEntity(entityKey).getData());
           
           // First, preserve the selected text by not replacing it
           // Move the selection to the end of the selected text
@@ -554,8 +587,8 @@ const TextEditor = () => {
           
           handleEditorStateChange(newEditorState);
           setToolbarPosition(null);
-          setLoading(false);
-          return; // Exit early since we've handled the canvas diagram
+          completeGeneration();
+          return true; // Return success for the promise
         }
       } else {
         throw new Error(`Unsupported science field: ${field}`);
@@ -623,22 +656,29 @@ const TextEditor = () => {
 
       handleEditorStateChange(newEditorState);
       setToolbarPosition(null);
+      completeGeneration();
+      return true; // Return success for the promise
     } catch (error) {
       console.error('Science diagram error:', error);
       setError(error.message || 'Failed to generate diagram');
+      return Promise.reject(error); // Propagate the error for the promise
     } finally {
-      // Clear the timeout to prevent memory leaks
-      if (resetTimeoutRef.current) {
-        clearTimeout(resetTimeoutRef.current);
-        resetTimeoutRef.current = null;
+      // We'll handle cleanup in the completeGeneration function for successful cases
+      // Only clean up here for error cases
+      if (error) {
+        // Clear the timeout to prevent memory leaks
+        if (resetTimeoutRef.current) {
+          clearTimeout(resetTimeoutRef.current);
+          resetTimeoutRef.current = null;
+        }
+        
+        setLoading(false);
+        
+        // Immediately reset the diagram generation flags
+        // This prevents any potential issues with the flags staying active
+        setIsGeneratingDiagram(false);
+        isGeneratingDiagramRef.current = false;
       }
-      
-      setLoading(false);
-      
-      // Immediately reset the diagram generation flags
-      // This prevents any potential issues with the flags staying active
-      setIsGeneratingDiagram(false);
-      isGeneratingDiagramRef.current = false;
       
       // Log the completion of diagram generation
       console.log('Diagram generation completed, all flags reset');
@@ -1343,7 +1383,7 @@ const TextEditor = () => {
       
       // Generate podcast
       const result = await generatePodcast(text, podcastOptions);
-      console.log('Podcast generation result:', result);
+      console.log('Podcast generation started:', result);
       
       // Check for immediate errors (like Hugging Face unusual activity)
       if (result.status === 'ERROR') {
@@ -1353,20 +1393,7 @@ const TextEditor = () => {
         return;
       }
       
-      // Check if the podcast is already complete (immediate completion)
-      if (result.status === 'COMPLETE' && result.audioUrl) {
-        console.log('Podcast completed immediately with URL:', result.audioUrl);
-        setPodcastStatus('complete');
-        setPodcastProgress(100);
-        setPodcastAudioUrl(result.audioUrl);
-        
-        if (result.transcript) {
-          setPodcastTranscript(result.transcript);
-        }
-        return;
-      }
-      
-      // Start polling for status if not immediately complete
+      // Start polling for status
       if (result && result.taskId) {
         pollPodcastStatus(
           result.taskId,

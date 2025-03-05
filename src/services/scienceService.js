@@ -56,27 +56,86 @@ export const generate3DChemicalStructure = async (compound) => {
 async function generateDrawingScript(text, diagramType) {
   try {
     console.log(`Generating ${diagramType} drawing script with AI for:`, text);
+    console.log('Text length:', text.length);
+    console.log('Text preview:', text.substring(0, 100) + '...');
+    console.log('Diagram type:', diagramType);
     
-    const response = await fetch('http://localhost:3001/api/generate-drawing-script', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        text, 
-        diagramType,
-        options: { scale: 4 } // Request 4x larger diagram content
-      }),
-    });
+    console.log('Sending request to /api/generate-drawing-script endpoint...');
+    const requestBody = { 
+      text, 
+      diagramType,
+      options: { scale: 4 } // Request 4x larger diagram content
+    };
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
+    
+    let response;
+    try {
+      response = await fetch('http://localhost:3001/api/generate-drawing-script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      console.log('Response received with status:', response.status, response.statusText);
+    } catch (fetchError) {
+      console.error('Fetch error in generateDrawingScript:', fetchError);
+      console.error('Fetch error stack:', fetchError.stack);
+      throw new Error(`Failed to connect to drawing script generation service: ${fetchError.message}`);
+    }
 
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    if (!response.ok) {
+      console.error('HTTP error in drawing script generation:', response.status, response.statusText);
+      let errorText;
+      try {
+        errorText = await response.text();
+        console.error('Error response body:', errorText);
+      } catch (textError) {
+        console.error('Failed to read error response body:', textError);
+      }
+      throw new Error(`HTTP error! status: ${response.status}, details: ${errorText || 'unknown'}`);
+    }
 
-    const data = await response.json();
-    if (!data.script) throw new Error('Invalid response from drawing script generation service');
+    let data;
+    try {
+      data = await response.json();
+      console.log('Response JSON parsed successfully');
+      console.log('Response data keys:', Object.keys(data));
+    } catch (jsonError) {
+      console.error('JSON parse error:', jsonError);
+      const rawText = await response.text();
+      console.error('Raw response text:', rawText.substring(0, 500) + '...');
+      throw new Error(`Failed to parse JSON from drawing script response: ${jsonError.message}`);
+    }
+    
+    if (!data.script) {
+      console.error('No script in response data:', data);
+      throw new Error('Invalid response from drawing script generation service: no script field');
+    }
 
     console.log('AI-generated script received, length:', data.script.length);
+    console.log('Script preview:', data.script.substring(0, 200) + '...');
+    console.log('Script contains function declaration:', data.script.includes('function') ? 'Yes' : 'No');
+    console.log('Script contains canvas operations:', 
+      (data.script.includes('ctx.') || data.script.includes('context.')) ? 'Yes' : 'No');
+    
+    // Check if the script contains the expected function name
+    const expectedFunctionName = `draw${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)}Diagram`;
+    console.log('Expected function name:', expectedFunctionName);
+    console.log('Script contains expected function name:', data.script.includes(expectedFunctionName) ? 'Yes' : 'No');
     
     // Extract JavaScript code from the response
     // The AI might return explanatory text and code blocks, so we need to extract just the code
     let cleanScript = data.script;
+    
+    // Check if the script is valid JavaScript
+    try {
+      // Try to validate the script by creating a function (but not executing it)
+      // eslint-disable-next-line no-new-func
+      new Function('canvas', cleanScript);
+      console.log('Script is valid JavaScript');
+    } catch (syntaxError) {
+      console.error('Script contains syntax errors:', syntaxError.message);
+      console.log('Attempting to extract valid JavaScript from the response...');
+    }
     
     // Check if the script contains markdown code blocks
     if (data.script.includes('```javascript')) {
@@ -170,11 +229,18 @@ async function generateDrawingScript(text, diagramType) {
     }
     
     console.log('Cleaned script length:', cleanScript.length);
-    console.log('Cleaned script preview:', cleanScript.substring(0, 100) + '...');
+    console.log('Cleaned script preview:', cleanScript.substring(0, 200) + '...');
+    console.log('Cleaned script starts with function:', cleanScript.trim().startsWith('function') ? 'Yes' : 'No');
+    console.log('Cleaned script contains canvas operations:', 
+      (cleanScript.includes('ctx.') || cleanScript.includes('context.')) ? 'Yes' : 'No');
+    console.log('Cleaned script function name:', cleanScript.match(/function\s+([\w]+)\s*\(/)?.[1] || 'Not found');
     
     return cleanScript;
   } catch (error) {
     console.error('Error generating drawing script with AI:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
     throw error;
   }
 }
@@ -360,32 +426,65 @@ export const generateChemicalStructure = async (compound, type = '2D') => {
 export const generatePhysicsDiagram = async (text, type) => {
   try {
     console.log(`Generating physics diagram for: ${text}, type: ${type}`);
+    console.log('Text length:', text.length);
+    console.log('Diagram type:', type);
 
     const diagramType = type.toLowerCase().replace('_diagram', '');
     console.log('Using diagram type:', diagramType);
+    console.log('Normalized diagram type:', diagramType);
     
     try {
       console.log('Attempting to generate AI drawing script...');
-      const drawingScript = await generateDrawingScript(text, diagramType);
-      console.log('AI drawing script generated successfully, length:', drawingScript.length);
-      console.log('Script preview:', drawingScript.substring(0, 100) + '...');
+      console.log('Calling generateDrawingScript with text length:', text.length, 'and diagram type:', diagramType);
+      let drawingScript;
+      try {
+        drawingScript = await generateDrawingScript(text, diagramType);
+      } catch (drawingError) {
+        console.error('Error in generateDrawingScript:', drawingError);
+        console.error('Drawing error stack:', drawingError.stack);
+        throw drawingError;
+      }
+      console.log('AI drawing script generated successfully, length:', drawingScript?.length || 0);
+      console.log('Script preview:', drawingScript?.substring(0, 100) + '...');
+      console.log('Script starts with function:', drawingScript?.trim().startsWith('function') ? 'Yes' : 'No');
+      console.log('Script contains canvas context operations:', 
+        (drawingScript?.includes('ctx.') || drawingScript?.includes('context.')) ? 'Yes' : 'No');
       
       const result = { type: 'canvas', rawScript: drawingScript, diagramType };
       console.log('Returning canvas result:', result);
+      console.log('Result object keys:', Object.keys(result));
+      console.log('Raw script length in result:', result.rawScript?.length || 0);
       return result;
     } catch (error) {
       console.error('AI script failed, using fallback:', error);
+      console.error('Error stack:', error.stack);
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
       console.log('Generating fallback script...');
-      const fallbackScript = generateFallbackScript(diagramType, text);
-      console.log('Fallback script generated, length:', fallbackScript.length);
-      console.log('Fallback script preview:', fallbackScript.substring(0, 100) + '...');
+      console.log('Using fallback for diagram type:', diagramType);
+      let fallbackScript;
+      try {
+        fallbackScript = generateFallbackScript(diagramType, text);
+      } catch (fallbackError) {
+        console.error('Error generating fallback script:', fallbackError);
+        console.error('Fallback error stack:', fallbackError.stack);
+        throw fallbackError;
+      }
+      console.log('Fallback script generated, length:', fallbackScript?.length || 0);
+      console.log('Fallback script preview:', fallbackScript?.substring(0, 100) + '...');
+      console.log('Fallback script starts with function:', fallbackScript?.trim().startsWith('function') ? 'Yes' : 'No');
+      console.log('Fallback script contains canvas context operations:', 
+        (fallbackScript?.includes('ctx.') || fallbackScript?.includes('context.')) ? 'Yes' : 'No');
       
       const result = { type: 'canvas', rawScript: fallbackScript, diagramType, fallback: true };
       console.log('Returning fallback canvas result:', result);
+      console.log('Fallback result object keys:', Object.keys(result));
+      console.log('Raw script length in fallback result:', result.rawScript?.length || 0);
       return result;
     }
   } catch (error) {
     console.error('Error generating physics diagram:', error);
+    console.error('Error stack:', error.stack);
     throw error;
   }
 };
